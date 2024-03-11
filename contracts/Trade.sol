@@ -23,8 +23,8 @@ contract Trade is ReentrancyGuardUpgradeable {
         Finalized,
         Cancelled,
         Disputed,
-        TimedOut
-        // Refunded
+        TimedOut,
+        Refunded
     }
 
     struct TradeDetails {
@@ -86,11 +86,48 @@ contract Trade is ReentrancyGuardUpgradeable {
         validTransitions[TradeStatus.FiatPaid][TradeStatus.Disputed] = true;
     }
 
+    event TradeInitiated(
+        uint256 indexed tradeId,
+        uint256 indexed offerId,
+        address indexed taker
+    );
+    event TradeAccepted(uint256 indexed tradeId);
+    event CryptoLockedInEscrow(uint256 indexed tradeId, uint256 amount);
+    event FiatMarkedAsPaid(uint256 indexed tradeId);
+    event TradeFinalized(uint256 indexed tradeId, uint256 timestamp);
+    event TradeCancelled(uint256 indexed tradeId, string reason);
+    event TradeDisputed(uint256 indexed tradeId);
+    event TradeTimedOut(uint256 indexed tradeId);
+    event TradeRated(uint256 indexed tradeId, uint256 rating, string feedback);
+    event AdminSet(address indexed admin, bool isAdmin);
+
     modifier onlyOwner() {
         require(
             msg.sender == owner,
             "Only the contract owner can perform this action"
         );
+        _;
+    }
+
+    modifier onlyAdmin() {
+        require(admins[msg.sender], "Only admin can perform this action");
+        _;
+    }
+
+    modifier onlyTradeParty(uint256 _tradeId) {
+        require(
+            trades[_tradeId].taker == msg.sender ||
+                offerContract
+                    .getOfferDetails(trades[_tradeId].offerId)
+                    .offerOwner ==
+                msg.sender,
+            "Only trade parties can perform this action"
+        );
+        _;
+    }
+
+    modifier tradeExists(uint256 _tradeId) {
+        require(_tradeId > 0 && _tradeId <= tradeCount, "Trade does not exist");
         _;
     }
 
@@ -102,22 +139,13 @@ contract Trade is ReentrancyGuardUpgradeable {
         }
 
         admins[owner] = true;
-    }
-
-    modifier onlyAdmin() {
-        require(admins[msg.sender], "Only admin can perform this action");
-        _;
+        emit AdminSet(owner, true);
     }
 
     function setAdmin(address _admin, bool _isAdmin) public onlyAdmin {
         admins[_admin] = _isAdmin;
+        emit AdminSet(_admin, _isAdmin);
     }
-
-    event TradeInitiated(
-        uint256 indexed tradeId,
-        uint256 indexed offerId,
-        address indexed taker
-    );
 
     function initiateTrade(
         uint256 _offerId,
@@ -170,7 +198,7 @@ contract Trade is ReentrancyGuardUpgradeable {
         trades[_tradeId].tradeStatus = _newStatus;
     }
 
-    function acceptTrade(uint256 _tradeId) public {
+    function acceptTrade(uint256 _tradeId) public tradeExists(_tradeId) {
         require(
             trades[_tradeId].tradeStatus == TradeStatus.Initiated,
             "Trade is not in initiated status"
@@ -183,12 +211,19 @@ contract Trade is ReentrancyGuardUpgradeable {
         );
 
         _updateTradeStatus(_tradeId, TradeStatus.Accepted);
+        emit TradeAccepted(_tradeId);
     }
 
-    function lockCryptoInEscrow(uint256 _tradeId) public nonReentrant {
+    function lockCryptoInEscrow(
+        uint256 _tradeId
+    ) public nonReentrant tradeExists(_tradeId) {
         require(
             trades[_tradeId].tradeStatus == TradeStatus.Accepted,
             "Trade is not in accepted status"
+        );
+        require(
+            trades[_tradeId].tradeStatus != TradeStatus.Finalized,
+            "Trade has already been finalized"
         );
         require(
             offerContract
@@ -199,9 +234,10 @@ contract Trade is ReentrancyGuardUpgradeable {
 
         // Call the Escrow contract to lock the crypto
         escrowContract.lockCrypto(_tradeId, trades[_tradeId].tradeAmountCrypto);
+        emit CryptoLockedInEscrow(_tradeId, trades[_tradeId].tradeAmountCrypto);
     }
 
-    function tradeMarkFiatPaid(uint256 _tradeId) public {
+    function tradeMarkFiatPaid(uint256 _tradeId) public tradeExists(_tradeId) {
         require(
             trades[_tradeId].tradeStatus == TradeStatus.Accepted,
             "Trade is not in accepted status"
@@ -212,14 +248,21 @@ contract Trade is ReentrancyGuardUpgradeable {
         );
 
         _updateTradeStatus(_tradeId, TradeStatus.FiatPaid);
+        emit FiatMarkedAsPaid(_tradeId);
     }
 
-    function finalizeTrade(uint256 _tradeId) public nonReentrant {
+    function finalizeTrade(
+        uint256 _tradeId
+    ) public nonReentrant tradeExists(_tradeId) {
         require(
             trades[_tradeId].tradeStatus == TradeStatus.FiatPaid ||
                 (trades[_tradeId].tradeStatus == TradeStatus.Disputed &&
                     admins[msg.sender]),
             "Trade is not in a finalizable state or caller is not an admin"
+        );
+        require(
+            trades[_tradeId].tradeStatus != TradeStatus.Finalized,
+            "Trade has already been finalized"
         );
         require(
             offerContract
@@ -235,13 +278,20 @@ contract Trade is ReentrancyGuardUpgradeable {
 
         // Call the Escrow contract to release the crypto to the taker
         escrowContract.releaseCrypto(_tradeId);
+        emit TradeFinalized(_tradeId, block.timestamp);
     }
 
-    function cancelTrade(uint256 _tradeId) public nonReentrant {
+    function cancelTrade(
+        uint256 _tradeId
+    ) public nonReentrant tradeExists(_tradeId) {
         require(
             trades[_tradeId].tradeStatus == TradeStatus.Initiated ||
                 trades[_tradeId].tradeStatus == TradeStatus.Accepted,
             "Trade cannot be cancelled at this stage"
+        );
+        require(
+            trades[_tradeId].tradeStatus != TradeStatus.Finalized,
+            "Trade has already been finalized"
         );
         require(
             trades[_tradeId].taker == msg.sender ||
@@ -258,9 +308,13 @@ contract Trade is ReentrancyGuardUpgradeable {
         if (trades[_tradeId].tradeStatus == TradeStatus.Accepted) {
             escrowContract.refundCrypto(_tradeId);
         }
+
+        emit TradeCancelled(_tradeId, trades[_tradeId].tradeCancelationReason);
     }
 
-    function disputeTrade(uint256 _tradeId) public nonReentrant {
+    function disputeTrade(
+        uint256 _tradeId
+    ) public nonReentrant tradeExists(_tradeId) {
         require(
             trades[_tradeId].tradeStatus == TradeStatus.Accepted ||
                 trades[_tradeId].tradeStatus == TradeStatus.FiatPaid,
@@ -269,6 +323,10 @@ contract Trade is ReentrancyGuardUpgradeable {
         require(
             trades[_tradeId].tradeStatus != TradeStatus.Disputed,
             "Trade is already disputed"
+        );
+        require(
+            trades[_tradeId].tradeStatus != TradeStatus.Finalized,
+            "Trade has already been finalized"
         );
         require(
             trades[_tradeId].taker == msg.sender ||
@@ -283,14 +341,19 @@ contract Trade is ReentrancyGuardUpgradeable {
 
         // Call the Arbitration contract to handle the dispute
         arbitrationContract.handleDispute(_tradeId);
+        emit TradeDisputed(_tradeId);
     }
 
-    function timeoutTrade(uint256 _tradeId) public {
+    function timeoutTrade(uint256 _tradeId) public tradeExists(_tradeId) {
         require(
             trades[_tradeId].tradeStatus == TradeStatus.Initiated ||
                 trades[_tradeId].tradeStatus == TradeStatus.Accepted ||
                 trades[_tradeId].tradeStatus == TradeStatus.FiatPaid,
             "Trade cannot be timed out at this stage"
+        );
+        require(
+            trades[_tradeId].tradeStatus != TradeStatus.TimedOut,
+            "Trade has already been timed out"
         );
         require(
             block.timestamp >=
@@ -300,6 +363,7 @@ contract Trade is ReentrancyGuardUpgradeable {
         );
 
         _updateTradeStatus(_tradeId, TradeStatus.TimedOut);
+        emit TradeTimedOut(_tradeId);
 
         // Call the Escrow contract to refund the crypto if it was locked
         if (trades[_tradeId].tradeStatus == TradeStatus.Accepted) {
@@ -307,7 +371,7 @@ contract Trade is ReentrancyGuardUpgradeable {
         }
     }
 
-    function refundTrade(uint256 _tradeId) public {
+    function refundTrade(uint256 _tradeId) public tradeExists(_tradeId) {
         require(
             trades[_tradeId].tradeStatus == TradeStatus.Cancelled ||
                 trades[_tradeId].tradeStatus == TradeStatus.TimedOut ||
@@ -321,24 +385,17 @@ contract Trade is ReentrancyGuardUpgradeable {
 
         // Refund logic handled by the Escrow contract
         // _updateTradeStatus(_tradeId, TradeStatus.Refunded);
+        // emit TradeRefunded(_tradeId);
     }
 
     function rateTrade(
         uint256 _tradeId,
         uint256 _rating,
         string memory _feedback
-    ) public {
+    ) public onlyTradeParty(_tradeId) tradeExists(_tradeId) {
         require(
             trades[_tradeId].tradeStatus == TradeStatus.Finalized,
             "Trade is not finalized"
-        );
-        require(
-            trades[_tradeId].taker == msg.sender ||
-                offerContract
-                    .getOfferDetails(trades[_tradeId].offerId)
-                    .offerOwner ==
-                msg.sender,
-            "Only trade parties can rate the trade"
         );
         require(_rating >= 1 && _rating <= 5, "Invalid rating value");
         require(
@@ -350,5 +407,45 @@ contract Trade is ReentrancyGuardUpgradeable {
 
         // Call the Rating contract to record the trade rating
         ratingContract.rateTrade(_tradeId, msg.sender, _rating, _feedback);
+        emit TradeRated(_tradeId, _rating, _feedback);
+    }
+
+    function getTradeDetails(
+        uint256 _tradeId
+    )
+        public
+        view
+        tradeExists(_tradeId)
+        returns (
+            uint256,
+            address,
+            uint256,
+            uint256,
+            string memory,
+            string memory,
+            uint256,
+            string memory,
+            TradeStatus,
+            uint256,
+            uint256,
+            uint256
+        )
+    {
+        TradeDetails memory trade = trades[_tradeId];
+
+        return (
+            trade.offerId,
+            trade.taker,
+            trade.tradeAmountFiat,
+            trade.tradeAmountCrypto,
+            trade.tradeFiatCurrency,
+            trade.tradeCryptoCurrency,
+            trade.blocksTillTimeout,
+            trade.tradeCancelationReason,
+            trade.tradeStatus,
+            trade.tradeInitiatedTime,
+            trade.tradeFinalizedTime,
+            trade.tradeFee
+        );
     }
 }
