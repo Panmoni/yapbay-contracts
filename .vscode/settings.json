@@ -1,0 +1,28 @@
+{
+  "workbench.colorCustomizations": {
+    "activityBar.activeBackground": "#f1c40f", // Hardhat yellow
+    "activityBar.background": "#f1c40f",
+    "activityBar.foreground": "#000000", // Black for contrast
+    "activityBar.inactiveForeground": "#00000099", // Slightly transparent black
+    "activityBarBadge.background": "#000000", // Black
+    "activityBarBadge.foreground": "#ffffff", // White for contrast
+    "commandCenter.border": "#00000099",
+    "editorCursor.foreground": "#f1c40f", // Hardhat yellow
+    "editorLineNumber.foreground": "#888888", // Gray
+    "editorOverviewRuler.border": "#f1c40f", // Hardhat yellow
+    "editorRuler.foreground": "#f1c40f", // Hardhat yellow
+    "panel.border": "#00000099", // Slightly transparent black
+    "panelTitle.activeBorder": "#f1c40f", // Hardhat yellow
+    "panelTitle.inactiveForeground": "#00000099", // Slightly transparent black
+    "sash.hoverBorder": "#f1c40f", // Hardhat yellow
+    "statusBar.background": "#f8f8f8", // Light gray
+    "statusBar.foreground": "#000000", // Black for contrast
+    "statusBarItem.hoverBackground": "#f1c40f", // Hardhat yellow
+    "statusBarItem.remoteBackground": "#f8f8f8", // Light gray
+    "statusBarItem.remoteForeground": "#000000", // Black for contrast
+    "titleBar.activeBackground": "#f8f8f8", // Light gray
+    "titleBar.activeForeground": "#000000", // Black for contrast
+    "titleBar.inactiveBackground": "#f8f8f8aa", // Slightly transparent light gray
+    "titleBar.inactiveForeground": "#00000099" // Slightly transparent black
+  }
+}
