@@ -136,6 +136,7 @@ contract Trade is ReentrancyGuardUpgradeable {
 
         for (uint256 i = 0; i < _admins.length; i++) {
             admins[_admins[i]] = true;
+            emit AdminSet(_admins[i], true);
         }
 
         admins[owner] = true;
@@ -261,6 +262,11 @@ contract Trade is ReentrancyGuardUpgradeable {
             "Trade is not in a finalizable state or caller is not an admin"
         );
         require(
+            trades[_tradeId].tradeStatus != TradeStatus.Cancelled &&
+                trades[_tradeId].tradeStatus != TradeStatus.TimedOut,
+            "Trade cannot be finalized if it is cancelled or timed out"
+        );
+        require(
             trades[_tradeId].tradeStatus != TradeStatus.Finalized,
             "Trade has already been finalized"
         );
@@ -288,6 +294,10 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus == TradeStatus.Initiated ||
                 trades[_tradeId].tradeStatus == TradeStatus.Accepted,
             "Trade cannot be cancelled at this stage"
+        );
+        require(
+            trades[_tradeId].tradeStatus != TradeStatus.Disputed,
+            "Trade cannot be cancelled if it is already disputed"
         );
         require(
             trades[_tradeId].tradeStatus != TradeStatus.Finalized,
@@ -383,6 +393,7 @@ contract Trade is ReentrancyGuardUpgradeable {
             "Only Escrow contract can call refund function"
         );
 
+        // TODO: decide what to do about refunds and where that happens.
         // Refund logic handled by the Escrow contract
         // _updateTradeStatus(_tradeId, TradeStatus.Refunded);
         // emit TradeRefunded(_tradeId);
@@ -446,6 +457,46 @@ contract Trade is ReentrancyGuardUpgradeable {
             trade.tradeInitiatedTime,
             trade.tradeFinalizedTime,
             trade.tradeFee
+        );
+    }
+
+    // Maybe count separately to save gas later on?
+    function getTradeCounts()
+        public
+        view
+        returns (uint256, uint256, uint256, uint256, uint256, uint256)
+    {
+        uint256 initiatedCount = 0;
+        uint256 acceptedCount = 0;
+        uint256 finalizedCount = 0;
+        uint256 cancelledCount = 0;
+        uint256 disputedCount = 0;
+        uint256 timedOutCount = 0;
+
+        for (uint256 i = 1; i <= tradeCount; i++) {
+            TradeStatus status = trades[i].tradeStatus;
+            if (status == TradeStatus.Initiated) {
+                initiatedCount++;
+            } else if (status == TradeStatus.Accepted) {
+                acceptedCount++;
+            } else if (status == TradeStatus.Finalized) {
+                finalizedCount++;
+            } else if (status == TradeStatus.Cancelled) {
+                cancelledCount++;
+            } else if (status == TradeStatus.Disputed) {
+                disputedCount++;
+            } else if (status == TradeStatus.TimedOut) {
+                timedOutCount++;
+            }
+        }
+
+        return (
+            initiatedCount,
+            acceptedCount,
+            finalizedCount,
+            cancelledCount,
+            disputedCount,
+            timedOutCount
         );
     }
 }

@@ -36,6 +36,15 @@ contract Account {
 
     event UserRegistered(address indexed user, uint256 indexed userId);
     event UserProfileUpdated(address indexed user, uint256 indexed userId);
+    event EndorsementGiven(address indexed endorser, address indexed endorsed);
+    event EndorsementReceived(
+        address indexed endorser,
+        address indexed endorsed
+    );
+    event ReputationUpdated(address indexed user, uint256 newReputationScore);
+    event DisputeInitiated(address indexed user);
+    event DisputeLost(address indexed user);
+    event TradeStatsUpdated(address indexed user);
 
     constructor() {
         owner = msg.sender;
@@ -102,15 +111,82 @@ contract Account {
         emit UserProfileUpdated(msg.sender, user.userId);
     }
 
+    // TODO:
+    // This function should be called whenever a user's reputation needs to be updated
+    // based on trade volume, active offers, number of trades, trade completion rate,
+    // trade partner ratings, endorsements, and a decay function for older trades.
     function userReputationCalc(address _user) public {
-        // TODO: Implement reputation calculation logic
-        // This function should be called whenever a user's reputation needs to be updated
-        // based on trade volume, active offers, number of trades, trade completion rate,
-        // trade partner ratings, endorsements, and a decay function for older trades.
+        UserStats storage stats = userStats[_user];
+
+        // Calculate reputation score based on user stats
+        uint256 reputationScore = 0;
+
+        // Increase reputation based on completed trades
+        reputationScore += stats.userTotalTradesCompleted * 10;
+
+        // Increase reputation based on trade volume
+        reputationScore += stats.userTotalTradeVolume / 1 ether;
+
+        // Decrease reputation based on disputes lost
+        reputationScore -= stats.userDisputesLost * 50;
+
+        // Increase reputation based on endorsements received
+        reputationScore += stats.userEndorsementsReceived * 5;
+
+        // Update user's reputation score
+        stats.userReputationScore = reputationScore;
+
+        emit ReputationUpdated(_user, reputationScore);
     }
 
-    // TODO: Implement functions for updating user stats (endorsements, disputes, trades, etc.)
-    // pending events
-    // - endorsement given/endorsement received
-    // - reputation updated?
+    function updateEndorsementsGiven(
+        address _endorser,
+        address _endorsed
+    ) public {
+        userStats[_endorser].userEndorsementsGiven++;
+        emit EndorsementGiven(_endorser, _endorsed);
+    }
+
+    function updateEndorsementsReceived(
+        address _endorser,
+        address _endorsed
+    ) public {
+        userStats[_endorsed].userEndorsementsReceived++;
+        emit EndorsementReceived(_endorser, _endorsed);
+    }
+
+    function updateDisputesInitiated(address _user) public {
+        userStats[_user].userDisputesInitiated++;
+        emit DisputeInitiated(_user);
+    }
+
+    function updateDisputesLost(address _user) public {
+        userStats[_user].userDisputesLost++;
+        emit DisputeLost(_user);
+    }
+
+    function updateTradeStats(
+        address _user,
+        uint256 _tradeVolume,
+        bool _initiated,
+        bool _accepted,
+        bool _completed
+    ) public {
+        UserStats storage stats = userStats[_user];
+        if (_initiated) {
+            stats.userTotalTradesInitiated++;
+        }
+        if (_accepted) {
+            stats.userTotalTradesAccepted++;
+        }
+        if (_completed) {
+            stats.userTotalTradesCompleted++;
+            stats.userTotalTradeVolume += _tradeVolume;
+            stats.userAverageTradeVolume =
+                stats.userTotalTradeVolume /
+                stats.userTotalTradesCompleted;
+            stats.userLastCompletedTradeDate = block.timestamp;
+        }
+        emit TradeStatsUpdated(_user);
+    }
 }
