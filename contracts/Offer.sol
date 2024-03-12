@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+/**
+ * @title Offer contract for managing trade offers
+ * @dev This contract handles offer creation, updates, and maintains offer statistics.
+ */
+
 contract Offer {
     address public owner;
     bool public paused;
+
+    // Connect this contract with trade contract address.
+    address public tradeContract;
 
     enum OfferStatus {
         Active,
@@ -23,14 +31,20 @@ contract Offer {
         string offerFiatCurrency;
         OfferStatus offerStatus;
         uint256 offerCreatedTime;
+        uint256 offerLastUpdatedTime;
     }
 
     uint256 public offerCount;
+
     mapping(uint256 => OfferDetails) public offers;
     mapping(address => uint256[]) public userOffers;
     mapping(uint256 => mapping(uint256 => bool)) public offerDisputeCounted;
     mapping(address => mapping(bytes32 => bool)) public offerParametersUsed;
 
+    // event TradeContractSet(
+    //     address indexed previousAddress,
+    //     address indexed newAddress
+    // );
     event OfferCreated(
         uint256 indexed offerId,
         address indexed offerOwner,
@@ -45,7 +59,9 @@ contract Offer {
         uint256 maxTradeAmount,
         OfferStatus status
     );
-    event OfferStatusChanged(uint256 indexed offerId, OfferStatus offerStatus);
+    event OfferPaused(uint256 indexed offerId);
+    event OfferActivated(uint256 indexed offerId);
+    event OfferWithdrawn(uint256 indexed offerId);
     event OfferMinMaxTradeAmountsChanged(
         uint256 indexed offerId,
         uint256 minAmount,
@@ -63,14 +79,31 @@ contract Offer {
     event ContractPaused();
     event ContractUnpaused();
 
-    constructor() {
+    constructor(address _tradeContract) {
+        require(_tradeContract != address(0), "Invalid Trade contract address");
         owner = msg.sender;
+        tradeContract = _tradeContract;
     }
+
+    // Or enable owner to change it?
+    // function setTradeContract(address _tradeContract) public onlyOwner {
+    //     require(_tradeContract != address(0), "Invalid Trade contract address");
+    //     emit TradeContractSet(tradeContract, _tradeContract);
+    //     tradeContract = _tradeContract;
+    // }
 
     modifier onlyOwner() {
         require(
             msg.sender == owner,
             "Only the contract owner can perform this action"
+        );
+        _;
+    }
+
+    modifier onlyTradeContract() {
+        require(
+            msg.sender == tradeContract,
+            "Only Trade contract can perform this action"
         );
         _;
     }
@@ -85,11 +118,24 @@ contract Offer {
         _;
     }
 
+    /**
+     * @dev Retrieves the list of offers created by a user
+     * @param _user The address of the user
+     * @return The array of offer IDs created by the user
+     */
+
     function getUserOffers(
         address _user
     ) public view returns (uint256[] memory) {
         return userOffers[_user];
     }
+
+    /**
+     * @dev Creates a new offer
+     * @param _minTradeAmount The minimum trade amount for the offer
+     * @param _maxTradeAmount The maximum trade amount for the offer
+     * @param _fiatCurrency The fiat currency for the offer
+     */
 
     function offerCreate(
         uint256 _minTradeAmount,
@@ -131,6 +177,7 @@ contract Offer {
             _maxTradeAmount,
             _fiatCurrency,
             OfferStatus.Active,
+            block.timestamp,
             block.timestamp
         );
 
@@ -144,6 +191,14 @@ contract Offer {
             OfferStatus.Active
         );
     }
+
+    /**
+     * @dev Updates an existing offer
+     * @param _offerId The ID of the offer to update
+     * @param _minTradeAmount The updated minimum trade amount for the offer
+     * @param _maxTradeAmount The updated maximum trade amount for the offer
+     * @param _status The updated status of the offer
+     */
 
     function offerUpdateOffer(
         uint256 _offerId,
@@ -161,19 +216,89 @@ contract Offer {
         );
 
         OfferDetails storage offer = offers[_offerId];
-        offer.offerMinTradeAmount = _minTradeAmount;
-        offer.offerMaxTradeAmount = _maxTradeAmount;
-        offer.offerStatus = _status;
+
+        if (
+            offer.offerMinTradeAmount != _minTradeAmount ||
+            offer.offerMaxTradeAmount != _maxTradeAmount
+        ) {
+            offer.offerMinTradeAmount = _minTradeAmount;
+            offer.offerMaxTradeAmount = _maxTradeAmount;
+            emit OfferMinMaxTradeAmountsChanged(
+                _offerId,
+                _minTradeAmount,
+                _maxTradeAmount
+            );
+        }
+
+        offer.offerLastUpdatedTime = block.timestamp;
 
         emit OfferUpdated(_offerId, _minTradeAmount, _maxTradeAmount, _status);
+
+        if (offer.offerStatus != _status) {
+            offer.offerStatus = _status;
+            if (_status == OfferStatus.Paused) {
+                emit OfferPaused(_offerId);
+            } else if (_status == OfferStatus.Active) {
+                emit OfferActivated(_offerId);
+            } else if (_status == OfferStatus.Withdrawn) {
+                emit OfferWithdrawn(_offerId);
+            }
+        }
     }
+
+    /**
+     * @dev Retrieves the details of an offer
+     * @param _offerId The ID of the offer
+     * @return The offer details
+     */
 
     function getOfferDetails(
         uint256 _offerId
-    ) public view offerExists(_offerId) returns (OfferDetails memory) {
-        return offers[_offerId];
+    )
+        public
+        view
+        offerExists(_offerId)
+        returns (
+            address,
+            uint256,
+            uint256,
+            uint256,
+            uint256,
+            uint256,
+            uint256,
+            uint256,
+            string memory,
+            bool,
+            uint256,
+            uint256
+        )
+    {
+        OfferDetails memory offer = offers[_offerId];
+        return (
+            offer.offerOwner,
+            offer.offerTotalTradesAccepted,
+            offer.offerTotalTradesCompleted,
+            offer.offerDisputesInvolved,
+            offer.offerDisputesLost,
+            offer.offerAverageTradeVolume,
+            offer.offerMinTradeAmount,
+            offer.offerMaxTradeAmount,
+            offer.offerFiatCurrency,
+            offer.offerStatus == OfferStatus.Active,
+            offer.offerCreatedTime,
+            offer.offerLastUpdatedTime
+        );
     }
 
+    /**
+     * @dev Retrieves the counts of accepted, completed, disputed, and lost trades for all offers
+     * @return acceptedCount The total number of accepted trades
+     * @return completedCount The total number of completed trades
+     * @return disputedCount The total number of disputed trades
+     * @return lostCount The total number of lost trades
+     */
+
+    // Opportunity to save on gas here by storing counts separately
     function getOfferCounts()
         public
         view
@@ -194,6 +319,17 @@ contract Offer {
         return (acceptedCount, completedCount, disputedCount, lostCount);
     }
 
+    /**
+     * @dev Updates the statistics of an offer based on trade events
+     * @param _offerId The ID of the offer
+     * @param _tradeVolume The trade volume
+     * @param _accepted Whether the trade was accepted
+     * @param _completed Whether the trade was completed
+     * @param _disputed Whether the trade was disputed
+     * @param _lost Whether the trade was lost
+     * @param _disputeId The ID of the dispute
+     */
+
     function updateOfferStats(
         uint256 _offerId,
         uint256 _tradeVolume,
@@ -202,17 +338,16 @@ contract Offer {
         bool _disputed,
         bool _lost,
         uint256 _disputeId
-    ) public offerExists(_offerId) whenNotPaused {
-        require(
-            msg.sender == address(tradeContract),
-            "Only Trade contract can update offer stats"
-        );
+    ) public offerExists(_offerId) whenNotPaused onlyTradeContract {
+        require(_disputeId > 0, "Invalid dispute ID");
 
         OfferDetails storage offer = offers[_offerId];
+        bool statsUpdated = false;
 
         if (_accepted) {
             offer.offerTotalTradesAccepted++;
             emit OfferTradeAccepted(_offerId);
+            statsUpdated = true;
         }
         if (_completed) {
             offer.offerTotalTradesCompleted++;
@@ -226,20 +361,29 @@ contract Offer {
             } else {
                 offer.offerAverageTradeVolume = _tradeVolume;
             }
+            statsUpdated = true;
         }
         if (_disputed && !offerDisputeCounted[_offerId][_disputeId]) {
             offer.offerDisputesInvolved++;
             offerDisputeCounted[_offerId][_disputeId] = true;
             emit OfferDisputeInvolved(_offerId, _disputeId);
+            statsUpdated = true;
         }
         if (_lost && !offerDisputeCounted[_offerId][_disputeId]) {
             offer.offerDisputesLost++;
             offerDisputeCounted[_offerId][_disputeId] = true;
             emit OfferDisputeLost(_offerId, _disputeId);
+            statsUpdated = true;
         }
 
-        emit OfferStatsUpdated(_offerId);
+        if (statsUpdated) {
+            emit OfferStatsUpdated(_offerId);
+        }
     }
+
+    /**
+     * @dev Pauses the contract, preventing offer creation and updates
+     */
 
     function pauseContract() public onlyOwner {
         require(!paused, "Contract is already paused");
@@ -247,11 +391,20 @@ contract Offer {
         emit ContractPaused();
     }
 
+    /**
+     * @dev Unpauses the contract, allowing offer creation and updates
+     */
+
     function unpauseContract() public onlyOwner {
         require(paused, "Contract is not paused");
         paused = false;
         emit ContractUnpaused();
     }
+
+    /**
+     * @dev Transfers ownership of the contract to a new owner
+     * @param _newOwner The address of the new owner
+     */
 
     function transferOwnership(address _newOwner) public onlyOwner {
         require(_newOwner != address(0), "Invalid new owner address");

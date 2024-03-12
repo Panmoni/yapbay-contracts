@@ -8,6 +8,11 @@ import "./Rating.sol";
 
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 
+/**
+ * @title Trade contract for managing trades between users
+ * @dev This contract handles trade initiation, acceptance, finalization, cancellation, and dispute resolution.
+ */
+
 contract Trade is ReentrancyGuardUpgradeable {
     Offer private offerContract;
     Escrow private escrowContract;
@@ -131,6 +136,11 @@ contract Trade is ReentrancyGuardUpgradeable {
         _;
     }
 
+    /**
+     * @dev Sets the initial admin addresses
+     * @param _admins An array of addresses to be set as admins
+     */
+
     function setInitialAdmins(address[] memory _admins) public onlyOwner {
         require(admins[owner] == false, "Initial admins can only be set once");
 
@@ -143,10 +153,27 @@ contract Trade is ReentrancyGuardUpgradeable {
         emit AdminSet(owner, true);
     }
 
+    /**
+     * @dev Sets or removes an admin
+     * @param _admin The address to be set or removed as an admin
+     * @param _isAdmin A boolean indicating whether to set or remove the admin
+     */
+
     function setAdmin(address _admin, bool _isAdmin) public onlyAdmin {
         admins[_admin] = _isAdmin;
         emit AdminSet(_admin, _isAdmin);
     }
+
+    /**
+     * @dev Initiates a new trade
+     * @param _offerId The ID of the offer for the trade
+     * @param _tradeAmountFiat The fiat amount of the trade
+     * @param _tradeAmountCrypto The crypto amount of the trade
+     * @param _tradeFiatCurrency The fiat currency of the trade
+     * @param _tradeCryptoCurrency The crypto currency of the trade
+     * @param _blocksTillTimeout The number of blocks until the trade times out
+     * @param _tradeCancelationReason The reason for trade cancellation, if applicable
+     */
 
     function initiateTrade(
         uint256 _offerId,
@@ -188,6 +215,12 @@ contract Trade is ReentrancyGuardUpgradeable {
         emit TradeInitiated(tradeCount, _offerId, msg.sender);
     }
 
+    /**
+     * @dev Updates the trade status
+     * @param _tradeId The ID of the trade
+     * @param _newStatus The new status of the trade
+     */
+
     function _updateTradeStatus(
         uint256 _tradeId,
         TradeStatus _newStatus
@@ -198,6 +231,11 @@ contract Trade is ReentrancyGuardUpgradeable {
         );
         trades[_tradeId].tradeStatus = _newStatus;
     }
+
+    /**
+     * @dev Accepts a trade
+     * @param _tradeId The ID of the trade to accept
+     */
 
     function acceptTrade(uint256 _tradeId) public tradeExists(_tradeId) {
         require(
@@ -214,6 +252,11 @@ contract Trade is ReentrancyGuardUpgradeable {
         _updateTradeStatus(_tradeId, TradeStatus.Accepted);
         emit TradeAccepted(_tradeId);
     }
+
+    /**
+     * @dev Locks the crypto amount in escrow for a trade
+     * @param _tradeId The ID of the trade
+     */
 
     function lockCryptoInEscrow(
         uint256 _tradeId
@@ -238,6 +281,11 @@ contract Trade is ReentrancyGuardUpgradeable {
         emit CryptoLockedInEscrow(_tradeId, trades[_tradeId].tradeAmountCrypto);
     }
 
+    /**
+     * @dev Marks the fiat as paid for a trade
+     * @param _tradeId The ID of the trade
+     */
+
     function tradeMarkFiatPaid(uint256 _tradeId) public tradeExists(_tradeId) {
         require(
             trades[_tradeId].tradeStatus == TradeStatus.Accepted,
@@ -251,6 +299,11 @@ contract Trade is ReentrancyGuardUpgradeable {
         _updateTradeStatus(_tradeId, TradeStatus.FiatPaid);
         emit FiatMarkedAsPaid(_tradeId);
     }
+
+    /**
+     * @dev Finalizes a trade
+     * @param _tradeId The ID of the trade to finalize
+     */
 
     function finalizeTrade(
         uint256 _tradeId
@@ -287,6 +340,11 @@ contract Trade is ReentrancyGuardUpgradeable {
         emit TradeFinalized(_tradeId, block.timestamp);
     }
 
+    /**
+     * @dev Cancels a trade
+     * @param _tradeId The ID of the trade to cancel
+     */
+
     function cancelTrade(
         uint256 _tradeId
     ) public nonReentrant tradeExists(_tradeId) {
@@ -322,6 +380,11 @@ contract Trade is ReentrancyGuardUpgradeable {
         emit TradeCancelled(_tradeId, trades[_tradeId].tradeCancelationReason);
     }
 
+    /**
+     * @dev Disputes a trade
+     * @param _tradeId The ID of the trade to dispute
+     */
+
     function disputeTrade(
         uint256 _tradeId
     ) public nonReentrant tradeExists(_tradeId) {
@@ -354,6 +417,11 @@ contract Trade is ReentrancyGuardUpgradeable {
         emit TradeDisputed(_tradeId);
     }
 
+    /**
+     * @dev Times out a trade
+     * @param _tradeId The ID of the trade to time out
+     */
+
     function timeoutTrade(uint256 _tradeId) public tradeExists(_tradeId) {
         require(
             trades[_tradeId].tradeStatus == TradeStatus.Initiated ||
@@ -381,6 +449,11 @@ contract Trade is ReentrancyGuardUpgradeable {
         }
     }
 
+    /**
+     * @dev Refunds a trade
+     * @param _tradeId The ID of the trade to refund
+     */
+
     function refundTrade(uint256 _tradeId) public tradeExists(_tradeId) {
         require(
             trades[_tradeId].tradeStatus == TradeStatus.Cancelled ||
@@ -398,6 +471,17 @@ contract Trade is ReentrancyGuardUpgradeable {
         // _updateTradeStatus(_tradeId, TradeStatus.Refunded);
         // emit TradeRefunded(_tradeId);
     }
+
+    /**
+     * @dev Allows a trade party to rate a finalized trade
+     * @param _tradeId The ID of the trade to rate
+     * @param _rating The rating value (1 to 5)
+     * @param _feedback The feedback string provided by the user
+     * @notice Only trade parties can rate a trade
+     * @notice Trade must be in finalized status
+     * @notice Rating value must be between 1 and 5
+     * @notice User can only rate a trade once
+     */
 
     function rateTrade(
         uint256 _tradeId,
@@ -420,6 +504,24 @@ contract Trade is ReentrancyGuardUpgradeable {
         ratingContract.rateTrade(_tradeId, msg.sender, _rating, _feedback);
         emit TradeRated(_tradeId, _rating, _feedback);
     }
+
+    /**
+     * @dev Retrieves the details of a trade
+     * @param _tradeId The ID of the trade
+     * @return offerId The ID of the offer associated with the trade
+     * @return taker The address of the trade taker
+     * @return tradeAmountFiat The fiat amount of the trade
+     * @return tradeAmountCrypto The crypto amount of the trade
+     * @return tradeFiatCurrency The fiat currency of the trade
+     * @return tradeCryptoCurrency The crypto currency of the trade
+     * @return blocksTillTimeout The number of blocks until the trade times out
+     * @return tradeCancelationReason The reason for trade cancellation, if applicable
+     * @return tradeStatus The current status of the trade
+     * @return tradeInitiatedTime The timestamp when the trade was initiated
+     * @return tradeFinalizedTime The timestamp when the trade was finalized
+     * @return tradeFee The fee associated with the trade
+     * @notice Trade must exist
+     */
 
     function getTradeDetails(
         uint256 _tradeId
@@ -460,7 +562,18 @@ contract Trade is ReentrancyGuardUpgradeable {
         );
     }
 
-    // Maybe count separately to save gas later on?
+    /**
+     * @dev Retrieves the counts of trades in different statuses
+     * @return initiatedCount The count of trades in initiated status
+     * @return acceptedCount The count of trades in accepted status
+     * @return finalizedCount The count of trades in finalized status
+     * @return cancelledCount The count of trades in cancelled status
+     * @return disputedCount The count of trades in disputed status
+     * @return timedOutCount The count of trades in timed out status
+     * @notice This function iterates through all trades to calculate the counts
+     */
+
+    // TODO: Maybe count separately to save gas later on?
     function getTradeCounts()
         public
         view

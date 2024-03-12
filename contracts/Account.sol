@@ -1,8 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+/**
+ * @title Account contract for managing user profiles and stats
+ * @dev This contract handles user registration, profile updates, and maintains user statistics.
+ */
+
 contract Account {
     address public owner;
+
+    // Connect this contract with trade contract address.
+    address public tradeContract;
+
+    // Connect this contract with arbitration contract address.
+    address public arbitrationContract;
 
     struct UserBasicInfo {
         uint256 userId;
@@ -45,7 +56,13 @@ contract Account {
     event DisputeInitiated(address indexed user);
     event DisputeLost(address indexed user);
     event TradeStatsUpdated(address indexed user);
+    event UserRoleUpdated(
+        address indexed user,
+        uint256 indexed userId,
+        string newRole
+    );
 
+    // TODO: add trade and arbitration contract vars to constructor?
     constructor() {
         owner = msg.sender;
     }
@@ -58,6 +75,24 @@ contract Account {
         _;
     }
 
+    modifier onlyAuthorized() {
+        require(
+            msg.sender == owner ||
+                msg.sender == tradeContract ||
+                msg.sender == arbitrationContract,
+            "Only authorized contracts can perform this action"
+        );
+        _;
+    }
+
+    /**
+     * @dev Registers a new user with basic information
+     * @param _userEmail The user's email address
+     * @param _userChatHandle The user's chat handle
+     * @param _userWebsite The user's website
+     * @param _userAvatar The user's avatar URL
+     */
+
     function userReg(
         bytes32 _userEmail,
         bytes32 _userChatHandle,
@@ -67,6 +102,10 @@ contract Account {
         require(
             userBasicInfo[msg.sender].userId == 0,
             "User already registered"
+        );
+        require(
+            _userEmail != bytes32(0) && _userChatHandle != bytes32(0),
+            "Email and chat handle cannot be empty"
         );
 
         userCount++;
@@ -83,11 +122,14 @@ contract Account {
         emit UserRegistered(msg.sender, userCount);
     }
 
-    event UserRoleUpdated(
-        address indexed user,
-        uint256 indexed userId,
-        string newRole
-    );
+    /**
+     * @dev Updates a user's profile information
+     * @param _userEmail The updated user's email address
+     * @param _userChatHandle The updated user's chat handle
+     * @param _userWebsite The updated user's website
+     * @param _userAvatar The updated user's avatar URL
+     * @param _userRole The updated user's role (only admin can update)
+     */
 
     function userUpdateProfile(
         bytes32 _userEmail,
@@ -97,6 +139,11 @@ contract Account {
         string memory _userRole
     ) public {
         require(userBasicInfo[msg.sender].userId != 0, "User not registered");
+        require(
+            msg.sender == owner ||
+                msg.sender == userIdToAddress[userBasicInfo[msg.sender].userId],
+            "Only the user or admin can update the profile"
+        );
 
         UserBasicInfo storage user = userBasicInfo[msg.sender];
         user.userEmail = _userEmail;
@@ -105,17 +152,22 @@ contract Account {
         user.userAvatar = _userAvatar;
 
         if (msg.sender == owner) {
-            user.userRole = _userRole; // Only the contract owner (admin) can update the user's role
+            user.userRole = _userRole;
+            emit UserRoleUpdated(msg.sender, user.userId, _userRole);
         }
 
         emit UserProfileUpdated(msg.sender, user.userId);
     }
 
-    // TODO:
+    /**
+     * @dev Calculates and updates a user's reputation score based on various factors
+     * @param _user The address of the user
+     */
+
     // This function should be called whenever a user's reputation needs to be updated
     // based on trade volume, active offers, number of trades, trade completion rate,
     // trade partner ratings, endorsements, and a decay function for older trades.
-    function userReputationCalc(address _user) public {
+    function userReputationCalc(address _user) public returns (uint256) {
         UserStats storage stats = userStats[_user];
 
         // Calculate reputation score based on user stats
@@ -137,33 +189,66 @@ contract Account {
         stats.userReputationScore = reputationScore;
 
         emit ReputationUpdated(_user, reputationScore);
+
+        return reputationScore;
     }
+
+    /**
+     * @dev Updates the number of endorsements given by a user
+     * @param _endorser The address of the endorser
+     * @param _endorsed The address of the endorsed user
+     */
 
     function updateEndorsementsGiven(
         address _endorser,
         address _endorsed
-    ) public {
+    ) public onlyAuthorized {
         userStats[_endorser].userEndorsementsGiven++;
         emit EndorsementGiven(_endorser, _endorsed);
     }
 
+    /**
+     * @dev Updates the number of endorsements received by a user
+     * @param _endorser The address of the endorser
+     * @param _endorsed The address of the endorsed user
+     */
+
     function updateEndorsementsReceived(
         address _endorser,
         address _endorsed
-    ) public {
+    ) public onlyAuthorized {
         userStats[_endorsed].userEndorsementsReceived++;
         emit EndorsementReceived(_endorser, _endorsed);
     }
 
-    function updateDisputesInitiated(address _user) public {
+    /**
+     * @dev Updates the number of disputes initiated by a user
+     * @param _user The address of the user
+     */
+
+    function updateDisputesInitiated(address _user) public onlyAuthorized {
         userStats[_user].userDisputesInitiated++;
         emit DisputeInitiated(_user);
     }
 
-    function updateDisputesLost(address _user) public {
+    /**
+     * @dev Updates the number of disputes lost by a user
+     * @param _user The address of the user
+     */
+
+    function updateDisputesLost(address _user) public onlyAuthorized {
         userStats[_user].userDisputesLost++;
         emit DisputeLost(_user);
     }
+
+    /**
+     * @dev Updates a user's trade statistics
+     * @param _user The address of the user
+     * @param _tradeVolume The volume of the trade
+     * @param _initiated Whether the trade was initiated by the user
+     * @param _accepted Whether the trade was accepted by the user
+     * @param _completed Whether the trade was completed
+     */
 
     function updateTradeStats(
         address _user,
@@ -171,7 +256,9 @@ contract Account {
         bool _initiated,
         bool _accepted,
         bool _completed
-    ) public {
+    ) public onlyAuthorized {
+        require(_tradeVolume > 0, "Trade volume must be greater than 0");
+
         UserStats storage stats = userStats[_user];
         if (_initiated) {
             stats.userTotalTradesInitiated++;
@@ -188,5 +275,35 @@ contract Account {
             stats.userLastCompletedTradeDate = block.timestamp;
         }
         emit TradeStatsUpdated(_user);
+    }
+
+    /**
+     * @dev Retrieves a user's reputation score
+     * @param _user The address of the user
+     * @return The user's reputation score
+     */
+
+    function getUserReputationScore(
+        address _user
+    ) public view returns (uint256) {
+        return userStats[_user].userReputationScore;
+    }
+
+    /**
+     * @dev Retrieves a user's basic information and statistics
+     * @param _user The address of the user
+     * @return basicInfo The user's basic information
+     * @return stats The user's statistics
+     */
+
+    function getUserInfo(
+        address _user
+    )
+        public
+        view
+        returns (UserBasicInfo memory basicInfo, UserStats memory stats)
+    {
+        basicInfo = userBasicInfo[_user];
+        stats = userStats[_user];
     }
 }

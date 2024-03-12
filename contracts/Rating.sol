@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.24;
 
 import "./Trade.sol";
 import "./Offer.sol";
 import "./Account.sol";
 
+/**
+ * @title Rating contract for managing trade ratings
+ * @dev This contract handles the rating of trades by trade parties.
+ */
 contract Rating {
     Trade private tradeContract;
     Offer private offerContract;
@@ -22,6 +26,7 @@ contract Rating {
 
     uint256 public ratingCount;
     mapping(uint256 => RatingDetails) public ratings;
+    mapping(uint256 => mapping(address => bool)) public tradeRatings;
 
     event TradeRated(
         uint256 indexed tradeId,
@@ -32,35 +37,91 @@ contract Rating {
         string rateString
     );
 
+    event UserReputationUpdated(address indexed user, uint256 newReputation);
+
     constructor(
         address _tradeContractAddress,
         address _offerContractAddress,
         address _accountContractAddress
     ) {
+        require(
+            _tradeContractAddress != address(0),
+            "Invalid Trade contract address"
+        );
+        require(
+            _offerContractAddress != address(0),
+            "Invalid Offer contract address"
+        );
+        require(
+            _accountContractAddress != address(0),
+            "Invalid Account contract address"
+        );
+
         tradeContract = Trade(_tradeContractAddress);
         offerContract = Offer(_offerContractAddress);
         accountContract = Account(_accountContractAddress);
     }
 
-    function rateTrade(
-        uint256 _tradeId,
-        address _raterId,
-        uint256 _rateStars,
-        string memory _rateString
-    ) public {
+    modifier onlyTradeParty(uint256 _tradeId) {
+        (, address maker, , , , , , , , , , ) = tradeContract.getTradeDetails(
+            _tradeId
+        );
+        (, address taker, , , , , , , , , , ) = tradeContract.getTradeDetails(
+            _tradeId
+        );
         require(
-            tradeContract.trades(_tradeId).tradeStatus ==
-                Trade.TradeStatus.Finalized,
+            msg.sender == maker || msg.sender == taker,
+            "Only trade parties can perform this action"
+        );
+        _;
+    }
+
+    modifier tradeExists(uint256 _tradeId) {
+        (uint256 offerId, , , , , , , , , , , ) = tradeContract.getTradeDetails(
+            _tradeId
+        );
+        require(offerId != 0, "Trade does not exist");
+        _;
+    }
+
+    modifier tradeFinalized(uint256 _tradeId) {
+        (, , , , , , , , Trade.TradeStatus tradeStatus, , , ) = tradeContract
+            .getTradeDetails(_tradeId);
+        require(
+            tradeStatus == Trade.TradeStatus.Finalized,
             "Trade is not in finalized status"
         );
+        _;
+    }
+
+    modifier notAlreadyRated(uint256 _tradeId) {
         require(
-            _raterId == tradeContract.trades(_tradeId).taker ||
-                _raterId ==
-                offerContract
-                    .getOfferDetails(tradeContract.trades(_tradeId).offerId)
-                    .offerOwner,
-            "Only trade parties can rate the trade"
+            !tradeRatings[_tradeId][msg.sender],
+            "Trade has already been rated by the user"
         );
+        _;
+    }
+
+    /**
+     * @dev Rates a trade
+     * @param _tradeId The ID of the trade
+     * @param _rateStars The rating stars given (1-5)
+     * @param _rateString The rating comment
+     * @notice Only the trade parties (maker or taker) can rate the trade
+     * @notice The trade must be in finalized status
+     * @notice The user can only rate a trade once
+     */
+    function rateTrade(
+        uint256 _tradeId,
+        uint256 _rateStars,
+        string memory _rateString
+    )
+        public
+        tradeExists(_tradeId)
+        tradeFinalized(_tradeId)
+        onlyTradeParty(_tradeId)
+        notAlreadyRated(_tradeId)
+    {
         require(
             _rateStars >= 1 && _rateStars <= 5,
             "Rating stars must be between 1 and 5"
@@ -70,36 +131,38 @@ contract Rating {
             "Rating string must not exceed 280 bytes"
         );
 
-        uint256 offerId = tradeContract.trades(_tradeId).offerId;
+        (uint256 offerId, address taker, , , , , , , , , , ) = tradeContract
+            .getTradeDetails(_tradeId);
         address rateeId;
-
-        if (_raterId == tradeContract.trades(_tradeId).taker) {
+        if (msg.sender == taker) {
             rateeId = offerContract.getOfferDetails(offerId).offerOwner;
         } else {
-            rateeId = tradeContract.trades(_tradeId).taker;
+            rateeId = taker;
         }
 
         ratingCount++;
         ratings[ratingCount] = RatingDetails(
             _tradeId,
             offerId,
-            _raterId,
+            msg.sender,
             rateeId,
             _rateStars,
             _rateString,
             block.timestamp
         );
+        tradeRatings[_tradeId][msg.sender] = true;
 
         emit TradeRated(
             _tradeId,
             offerId,
-            _raterId,
+            msg.sender,
             rateeId,
             _rateStars,
             _rateString
         );
 
         // Update user reputation in the Account contract
-        accountContract.updateUserReputation(rateeId, _rateStars);
+        uint256 newReputation = accountContract.userReputationCalc(rateeId);
+        emit UserReputationUpdated(rateeId, newReputation);
     }
 }
