@@ -120,12 +120,10 @@ contract Trade is ReentrancyGuardUpgradeable {
     }
 
     modifier onlyTradeParty(uint256 _tradeId) {
+        (address offerOwner, , , , , , , , , , , ) = offerContract
+            .getOfferDetails(trades[_tradeId].offerId);
         require(
-            trades[_tradeId].taker == msg.sender ||
-                offerContract
-                    .getOfferDetails(trades[_tradeId].offerId)
-                    .offerOwner ==
-                msg.sender,
+            trades[_tradeId].taker == msg.sender || offerOwner == msg.sender,
             "Only trade parties can perform this action"
         );
         _;
@@ -184,15 +182,24 @@ contract Trade is ReentrancyGuardUpgradeable {
         uint256 _blocksTillTimeout,
         string memory _tradeCancelationReason
     ) public {
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint256 offerMinTradeAmount,
+            uint256 offerMaxTradeAmount,
+            ,
+            bool offerStatus,
+            ,
+
+        ) = offerContract.getOfferDetails(_offerId);
+        require(offerStatus, "Offer is not active");
         require(
-            offerContract.getOfferDetails(_offerId).offerStatus,
-            "Offer is not active"
-        );
-        require(
-            _tradeAmountFiat >=
-                offerContract.getOfferDetails(_offerId).offerMinTradeAmount &&
-                _tradeAmountFiat <=
-                offerContract.getOfferDetails(_offerId).offerMaxTradeAmount,
+            _tradeAmountFiat >= offerMinTradeAmount &&
+                _tradeAmountFiat <= offerMaxTradeAmount,
             "Trade amount is outside the offer range"
         );
 
@@ -242,10 +249,10 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus == TradeStatus.Initiated,
             "Trade is not in initiated status"
         );
+        (address offerOwner, , , , , , , , , , , ) = offerContract
+            .getOfferDetails(trades[_tradeId].offerId);
         require(
-            offerContract
-                .getOfferDetails(trades[_tradeId].offerId)
-                .offerOwner == msg.sender,
+            offerOwner == msg.sender,
             "Only offer owner can accept the trade"
         );
 
@@ -269,10 +276,10 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus != TradeStatus.Finalized,
             "Trade has already been finalized"
         );
+        (address offerOwner, , , , , , , , , , , ) = offerContract
+            .getOfferDetails(trades[_tradeId].offerId);
         require(
-            offerContract
-                .getOfferDetails(trades[_tradeId].offerId)
-                .offerOwner == msg.sender,
+            offerOwner == msg.sender,
             "Only offer owner can lock crypto in escrow"
         );
 
@@ -323,12 +330,10 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus != TradeStatus.Finalized,
             "Trade has already been finalized"
         );
+        (address offerOwner, , , , , , , , , , , ) = offerContract
+            .getOfferDetails(trades[_tradeId].offerId);
         require(
-            offerContract
-                .getOfferDetails(trades[_tradeId].offerId)
-                .offerOwner ==
-                msg.sender ||
-                admins[msg.sender],
+            offerOwner == msg.sender || admins[msg.sender],
             "Only offer owner or admin can finalize the trade"
         );
 
@@ -336,7 +341,7 @@ contract Trade is ReentrancyGuardUpgradeable {
         trades[_tradeId].tradeFinalizedTime = block.timestamp;
 
         // Call the Escrow contract to release the crypto to the taker
-        escrowContract.releaseCrypto(_tradeId);
+        escrowContract.releaseCrypto(_tradeId, payable(trades[_tradeId].taker));
         emit TradeFinalized(_tradeId, block.timestamp);
     }
 
@@ -361,13 +366,11 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus != TradeStatus.Finalized,
             "Trade has already been finalized"
         );
+        (address offerOwner, , , , , , , , , , , ) = offerContract
+            .getOfferDetails(trades[_tradeId].offerId);
         require(
-            trades[_tradeId].taker == msg.sender ||
-                offerContract
-                    .getOfferDetails(trades[_tradeId].offerId)
-                    .offerOwner ==
-                msg.sender,
-            "Only trade parties can cancel the trade"
+            trades[_tradeId].taker == msg.sender || offerOwner == msg.sender,
+            "Only trade parties can dispute the trade"
         );
 
         _updateTradeStatus(_tradeId, TradeStatus.Cancelled);
@@ -401,12 +404,10 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus != TradeStatus.Finalized,
             "Trade has already been finalized"
         );
+        (address offerOwner, , , , , , , , , , , ) = offerContract
+            .getOfferDetails(trades[_tradeId].offerId);
         require(
-            trades[_tradeId].taker == msg.sender ||
-                offerContract
-                    .getOfferDetails(trades[_tradeId].offerId)
-                    .offerOwner ==
-                msg.sender,
+            trades[_tradeId].taker == msg.sender || offerOwner == msg.sender,
             "Only trade parties can dispute the trade"
         );
 
@@ -454,7 +455,9 @@ contract Trade is ReentrancyGuardUpgradeable {
      * @param _tradeId The ID of the trade to refund
      */
 
-    function refundTrade(uint256 _tradeId) public tradeExists(_tradeId) {
+    function refundTrade(
+        uint256 _tradeId
+    ) public tradeExists(_tradeId) nonReentrant {
         require(
             trades[_tradeId].tradeStatus == TradeStatus.Cancelled ||
                 trades[_tradeId].tradeStatus == TradeStatus.TimedOut ||
@@ -501,7 +504,8 @@ contract Trade is ReentrancyGuardUpgradeable {
         tradeRatings[_tradeId][msg.sender] = true;
 
         // Call the Rating contract to record the trade rating
-        ratingContract.rateTrade(_tradeId, msg.sender, _rating, _feedback);
+        ratingContract.rateTrade(_tradeId, _rating, _feedback);
+
         emit TradeRated(_tradeId, _rating, _feedback);
     }
 
