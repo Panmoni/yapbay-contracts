@@ -240,6 +240,23 @@ contract Trade is ReentrancyGuardUpgradeable {
     }
 
     /**
+     * @dev Updates the trade status from the Arbitration contract
+     * @param _tradeId The ID of the trade
+     * @param _newStatus The new status of the trade
+     * @notice Only the Arbitration contract can call this function
+     */
+    function updateTradeStatusFromArbitration(
+        uint256 _tradeId,
+        TradeStatus _newStatus
+    ) public {
+        require(
+            msg.sender == address(arbitrationContract),
+            "Only Arbitration contract can call this function"
+        );
+        _updateTradeStatus(_tradeId, _newStatus);
+    }
+
+    /**
      * @dev Accepts a trade
      * @param _tradeId The ID of the trade to accept
      */

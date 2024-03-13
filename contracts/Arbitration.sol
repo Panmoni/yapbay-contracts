@@ -132,10 +132,10 @@ contract Arbitration {
     }
 
     modifier tradeExists(uint256 _tradeId) {
-        require(
-            tradeContract.trades(_tradeId).offerId != 0,
-            "Trade does not exist"
+        (uint256 offerId, , , , , , , , , , , ) = tradeContract.getTradeDetails(
+            _tradeId
         );
+        require(offerId != 0, "Trade does not exist");
         _;
     }
 
@@ -228,13 +228,13 @@ contract Arbitration {
 
         if (resolvedInFavorOfMaker) {
             escrowContract.releaseCrypto(tradeId, payable(maker));
-            tradeContract.updateTradeStatus(
+            tradeContract.updateTradeStatusFromArbitration(
                 tradeId,
                 Trade.TradeStatus.Finalized
             );
         } else {
-            escrowContract.refundCrypto(tradeId, payable(taker));
-            tradeContract.updateTradeStatus(
+            escrowContract.refundCrypto(tradeId);
+            tradeContract.updateTradeStatusFromArbitration(
                 tradeId,
                 Trade.TradeStatus.Cancelled
             );
@@ -243,11 +243,16 @@ contract Arbitration {
         emit DisputeResolved(tradeId, _disputeId, resolvedInFavorOfMaker);
         emit DisputeResolutionTimelockExpired(tradeId, _disputeId);
 
-        accountContract.updateDisputeStats(
-            maker,
-            taker,
-            resolvedInFavorOfMaker
-        );
+        // Update the disputes initiated for both maker and taker
+        accountContract.updateDisputesInitiated(maker);
+        accountContract.updateDisputesInitiated(taker);
+
+        // Update the disputes lost based on the dispute outcome
+        if (resolvedInFavorOfMaker) {
+            accountContract.updateDisputesLost(taker);
+        } else {
+            accountContract.updateDisputesLost(maker);
+        }
     }
 
     /**
@@ -317,12 +322,14 @@ contract Arbitration {
      * @notice Only the Trade contract can call this function
      * @notice The trade must be in disputed status
      */
+
     function handleDispute(
         uint256 _tradeId
     ) public onlyTradeContract tradeExists(_tradeId) {
+        (, , , , , , , , Trade.TradeStatus tradeStatus, , , ) = tradeContract
+            .getTradeDetails(_tradeId);
         require(
-            tradeContract.trades(_tradeId).tradeStatus ==
-                Trade.TradeStatus.Disputed,
+            tradeStatus == Trade.TradeStatus.Disputed,
             "Trade is not in disputed status"
         );
 
@@ -364,9 +371,6 @@ contract Arbitration {
         (, address maker, , , , , , , , , , ) = tradeContract.getTradeDetails(
             tradeId
         );
-        (, address taker, , , , , , , , , , ) = tradeContract.getTradeDetails(
-            tradeId
-        );
 
         disputes[_disputeId].status = DisputeStatus.Resolved;
         disputes[_disputeId].resolveTimestamp = block.timestamp;
@@ -375,7 +379,7 @@ contract Arbitration {
         if (_resolveInFavorOfMaker) {
             escrowContract.releaseCrypto(tradeId, payable(maker));
         } else {
-            escrowContract.refundCrypto(tradeId, payable(taker));
+            escrowContract.refundCrypto(tradeId);
         }
 
         emit DisputeResolved(tradeId, _disputeId, _resolveInFavorOfMaker);
