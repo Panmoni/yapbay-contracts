@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import "./Account.sol";
+
 /**
  * @title Offer contract for managing trade offers
  * @dev This contract handles offer creation, updates, and maintains offer statistics.
