@@ -135,7 +135,9 @@ contract Rating {
             .getTradeDetails(_tradeId);
         address rateeId;
         if (msg.sender == taker) {
-            rateeId = offerContract.getOfferDetails(offerId).offerOwner;
+            (address offerOwner, , , , , , , , , , , ) = offerContract
+                .getOfferDetails(offerId);
+            rateeId = offerOwner;
         } else {
             rateeId = taker;
         }
