@@ -47,6 +47,11 @@ contract Escrow is ReentrancyGuardUpgradeable {
         uint256 platformFeePercentage,
         uint256 penaltyPercentage
     );
+    event EscrowTransferred(
+        uint256 indexed sourceTradeId,
+        uint256 indexed destTradeId,
+        uint256 amount
+    );
 
     constructor(
         address _admin,
@@ -129,20 +134,11 @@ contract Escrow is ReentrancyGuardUpgradeable {
         emit CryptoLocked(_tradeId, _amount);
     }
 
-    /**
-     * @dev Releases the crypto to the receiver after trade finalization or dispute resolution
-     * @param _tradeId The ID of the trade
-     * @param _receiver The address of the receiver
-     * @notice Only the Trade contract can call this function
-     * @notice The crypto must be locked for the trade
-     * @notice The crypto must not be already released or refunded for the trade
-     * @notice The trade must be finalized or the dispute must be resolved in favor of the maker
-     */
-
     function releaseCrypto(
         uint256 _tradeId,
         address payable _receiver
     ) public nonReentrant onlyTradeContract {
+        // Check if the trade escrow is locked and not released or refunded
         require(
             escrows[_tradeId].isLocked,
             "The crypto is not locked for this trade"
@@ -156,68 +152,69 @@ contract Escrow is ReentrancyGuardUpgradeable {
             "The crypto is already refunded for this trade"
         );
 
-        (, , , , , , , , Trade.TradeStatus tradeStatus, , , ) = tradeContract
-            .getTradeDetails(_tradeId);
+        // Get the escrow amount
+        uint256 amount = escrows[_tradeId].amount;
 
-        require(
-            tradeStatus == Trade.TradeStatus.Finalized ||
-                (arbitrationContract.isDisputeResolved(_tradeId) &&
-                    arbitrationContract.getDisputeOutcome(_tradeId)),
-            "Trade is not finalized or dispute is not resolved in favor of maker"
-        );
+        // Transfer the crypto to the receiver
+        _receiver.transfer(amount);
 
+        // Update the escrow balances and state variables accordingly
+        escrows[_tradeId].amount = 0;
         escrows[_tradeId].isReleased = true;
 
-        uint256 feeAmount = calculatePlatformFee(_tradeId);
-        uint256 releaseAmount = escrows[_tradeId].amount - feeAmount;
-
-        _receiver.transfer(releaseAmount);
-
-        emit CryptoReleased(_tradeId, releaseAmount);
-        emit PlatformFeePaid(_tradeId, feeAmount);
+        // Emit event for crypto release
+        emit CryptoReleased(_tradeId, amount);
     }
-
-    /**
-     * @dev Refunds the crypto to the taker if the trade is cancelled, timed out, or dispute resolved in favor of taker
-     * @param _tradeId The ID of the trade
-     * @notice Only the Trade contract can call this function
-     * @notice The crypto must be locked for the trade
-     * @notice The crypto must not be already refunded for the trade
-     * @notice The trade must be cancelled, timed out, or the dispute must be resolved in favor of the taker
-     */
 
     function refundCrypto(
         uint256 _tradeId
     ) public nonReentrant onlyTradeContract {
+        // Check if the trade escrow is locked and not released or refunded
+        require(escrows[_tradeId].isLocked, "The trade escrow is not locked");
         require(
-            escrows[_tradeId].isLocked,
-            "Crypto is not locked for this trade"
+            !escrows[_tradeId].isReleased,
+            "The trade escrow is already released"
         );
         require(
             !escrows[_tradeId].isRefunded,
-            "Crypto is already refunded for this trade"
+            "The trade escrow is already refunded"
         );
 
-        (, , , , , , , , Trade.TradeStatus tradeStatus, , , ) = tradeContract
-            .getTradeDetails(_tradeId);
-        require(
-            tradeStatus == Trade.TradeStatus.Cancelled ||
-                tradeStatus == Trade.TradeStatus.TimedOut ||
-                (arbitrationContract.isDisputeResolved(_tradeId) &&
-                    !arbitrationContract.getDisputeOutcome(_tradeId)),
-            "Trade is not cancelled, timed out, or dispute is not resolved in favor of taker"
-        );
-
-        escrows[_tradeId].isRefunded = true;
-
-        // Get the trade details
-        (, address taker, , , , , , , , , , ) = tradeContract.getTradeDetails(
+        // Determine the previous escrow account in the sequence
+        uint256 prevTradeId = tradeContract.getPreviousTradeInSequence(
             _tradeId
         );
 
-        payable(taker).transfer(escrows[_tradeId].amount);
+        // Check if there is a previous trade in the sequence
+        if (prevTradeId != 0) {
+            // Transfer the crypto from the current escrow to the previous escrow
+            uint256 refundAmount = escrows[_tradeId].amount;
+            escrows[_tradeId].amount = 0;
+            escrows[prevTradeId].amount += refundAmount;
 
-        emit CryptoRefunded(_tradeId, escrows[_tradeId].amount);
+            // Update the escrow balances and state variables accordingly
+            escrows[_tradeId].isLocked = false;
+            escrows[_tradeId].isRefunded = true;
+            escrows[prevTradeId].isLocked = true;
+
+            // Emit events for crypto refund and escrow transfer
+            emit CryptoRefunded(_tradeId, refundAmount);
+            emit EscrowTransferred(_tradeId, prevTradeId, refundAmount);
+        } else {
+            // If there is no previous trade, refund the crypto to the original sender
+            uint256 refundAmount = escrows[_tradeId].amount;
+            escrows[_tradeId].amount = 0;
+            payable(tradeContract.getTradeMaker(_tradeId)).transfer(
+                refundAmount
+            );
+
+            // Update the escrow balances and state variables accordingly
+            escrows[_tradeId].isLocked = false;
+            escrows[_tradeId].isRefunded = true;
+
+            // Emit event for crypto refund
+            emit CryptoRefunded(_tradeId, refundAmount);
+        }
     }
 
     /**
@@ -381,5 +378,50 @@ contract Escrow is ReentrancyGuardUpgradeable {
         uint256 _tradeId
     ) internal view returns (uint256) {
         return (escrows[_tradeId].amount * platformFeePercentage) / 100;
+    }
+
+    function transferEscrow(
+        uint256 _sourceTradeId,
+        uint256 _destTradeId,
+        uint256 _amount
+    ) public nonReentrant onlyTradeContract {
+        // Check if the source trade escrow is locked and not released or refunded
+        require(
+            escrows[_sourceTradeId].isLocked,
+            "The source trade escrow is not locked"
+        );
+        require(
+            !escrows[_sourceTradeId].isReleased,
+            "The source trade escrow is already released"
+        );
+        require(
+            !escrows[_sourceTradeId].isRefunded,
+            "The source trade escrow is already refunded"
+        );
+
+        // Check if the destination trade exists
+        require(
+            _destTradeId > 0 && _destTradeId <= tradeContract.tradeCount(),
+            "Destination trade does not exist"
+        );
+
+        // Check if the source escrow has sufficient balance
+        require(
+            escrows[_sourceTradeId].amount >= _amount,
+            "Insufficient balance in the source escrow"
+        );
+
+        // Transfer the specified amount from the source escrow to the destination escrow
+        escrows[_sourceTradeId].amount -= _amount;
+        escrows[_destTradeId].amount += _amount;
+
+        // Update the escrow balances and state variables accordingly
+        if (escrows[_sourceTradeId].amount == 0) {
+            escrows[_sourceTradeId].isLocked = false;
+        }
+        escrows[_destTradeId].isLocked = true;
+
+        // Emit events for escrow transfer
+        emit EscrowTransferred(_sourceTradeId, _destTradeId, _amount);
     }
 }

@@ -53,6 +53,7 @@ contract Trade is ReentrancyGuardUpgradeable {
         public validTransitions;
     mapping(address => bool) public admins;
     mapping(uint256 => mapping(address => bool)) public tradeRatings;
+    mapping(uint256 => uint256[]) public tradeSequence;
 
     constructor(
         address _offerContractAddress,
@@ -105,6 +106,7 @@ contract Trade is ReentrancyGuardUpgradeable {
     event TradeTimedOut(uint256 indexed tradeId);
     event TradeRated(uint256 indexed tradeId, uint256 rating, string feedback);
     event AdminSet(address indexed admin, bool isAdmin);
+    event TradeSequenceCreated(uint256[] tradeIds);
 
     modifier onlyOwner() {
         require(
@@ -162,19 +164,8 @@ contract Trade is ReentrancyGuardUpgradeable {
         emit AdminSet(_admin, _isAdmin);
     }
 
-    /**
-     * @dev Initiates a new trade
-     * @param _offerId The ID of the offer for the trade
-     * @param _tradeAmountFiat The fiat amount of the trade
-     * @param _tradeAmountCrypto The crypto amount of the trade
-     * @param _tradeFiatCurrency The fiat currency of the trade
-     * @param _tradeCryptoCurrency The crypto currency of the trade
-     * @param _blocksTillTimeout The number of blocks until the trade times out
-     * @param _tradeCancelationReason The reason for trade cancellation, if applicable
-     */
-
     function initiateTrade(
-        uint256 _offerId,
+        uint256[] memory _offerIds,
         uint256 _tradeAmountFiat,
         uint256 _tradeAmountCrypto,
         string memory _tradeFiatCurrency,
@@ -182,44 +173,36 @@ contract Trade is ReentrancyGuardUpgradeable {
         uint256 _blocksTillTimeout,
         string memory _tradeCancelationReason
     ) public {
-        (
-            ,
-            ,
-            ,
-            ,
-            ,
-            ,
-            uint256 offerMinTradeAmount,
-            uint256 offerMaxTradeAmount,
-            ,
-            bool offerStatus,
-            ,
+        require(_offerIds.length > 0, "At least one offer ID is required");
 
-        ) = offerContract.getOfferDetails(_offerId);
-        require(offerStatus, "Offer is not active");
-        require(
-            _tradeAmountFiat >= offerMinTradeAmount &&
-                _tradeAmountFiat <= offerMaxTradeAmount,
-            "Trade amount is outside the offer range"
-        );
+        uint256[] memory tradeIds = new uint256[](_offerIds.length);
 
-        tradeCount++;
-        trades[tradeCount] = TradeDetails(
-            _offerId,
-            msg.sender,
-            _tradeAmountFiat,
-            _tradeAmountCrypto,
-            _tradeFiatCurrency,
-            _tradeCryptoCurrency,
-            _blocksTillTimeout,
-            _tradeCancelationReason,
-            TradeStatus.Initiated,
-            block.timestamp,
-            0,
-            0
-        );
+        for (uint256 i = 0; i < _offerIds.length; i++) {
+            uint256 offerId = _offerIds[i];
+            // Perform necessary checks and validations for each offer
 
-        emit TradeInitiated(tradeCount, _offerId, msg.sender);
+            tradeCount++;
+            trades[tradeCount] = TradeDetails(
+                offerId,
+                msg.sender,
+                _tradeAmountFiat,
+                _tradeAmountCrypto,
+                _tradeFiatCurrency,
+                _tradeCryptoCurrency,
+                _blocksTillTimeout,
+                _tradeCancelationReason,
+                TradeStatus.Initiated,
+                block.timestamp,
+                0,
+                0
+            );
+
+            tradeIds[i] = tradeCount;
+            emit TradeInitiated(tradeCount, offerId, msg.sender);
+        }
+
+        tradeSequence[tradeIds[0]] = tradeIds;
+        emit TradeSequenceCreated(tradeIds);
     }
 
     /**
@@ -256,11 +239,6 @@ contract Trade is ReentrancyGuardUpgradeable {
         _updateTradeStatus(_tradeId, _newStatus);
     }
 
-    /**
-     * @dev Accepts a trade
-     * @param _tradeId The ID of the trade to accept
-     */
-
     function acceptTrade(uint256 _tradeId) public tradeExists(_tradeId) {
         require(
             trades[_tradeId].tradeStatus == TradeStatus.Initiated,
@@ -272,6 +250,23 @@ contract Trade is ReentrancyGuardUpgradeable {
             offerOwner == msg.sender,
             "Only offer owner can accept the trade"
         );
+
+        uint256[] storage sequence = tradeSequence[_tradeId];
+        if (sequence.length > 0 && sequence[0] == _tradeId) {
+            // If it's the first trade in the sequence, lock the crypto in escrow
+            escrowContract.lockCrypto(
+                _tradeId,
+                trades[_tradeId].tradeAmountCrypto
+            );
+        } else {
+            // If it's a subsequent trade, transfer the crypto from the previous escrow to the current escrow
+            uint256 prevTradeId = getPreviousTradeInSequence(_tradeId);
+            escrowContract.transferEscrow(
+                prevTradeId,
+                _tradeId,
+                trades[_tradeId].tradeAmountCrypto
+            );
+        }
 
         _updateTradeStatus(_tradeId, TradeStatus.Accepted);
         emit TradeAccepted(_tradeId);
@@ -305,11 +300,6 @@ contract Trade is ReentrancyGuardUpgradeable {
         emit CryptoLockedInEscrow(_tradeId, trades[_tradeId].tradeAmountCrypto);
     }
 
-    /**
-     * @dev Marks the fiat as paid for a trade
-     * @param _tradeId The ID of the trade
-     */
-
     function tradeMarkFiatPaid(uint256 _tradeId) public tradeExists(_tradeId) {
         require(
             trades[_tradeId].tradeStatus == TradeStatus.Accepted,
@@ -320,14 +310,25 @@ contract Trade is ReentrancyGuardUpgradeable {
             "Only trade taker can mark fiat as paid"
         );
 
+        uint256[] storage sequence = tradeSequence[_tradeId];
+        if (sequence.length > 0 && sequence[sequence.length - 1] == _tradeId) {
+            // If it's the last trade in the sequence, release the crypto to the taker
+            escrowContract.releaseCrypto(
+                _tradeId,
+                payable(trades[_tradeId].taker)
+            );
+        } else {
+            // If it's an intermediate trade, release the crypto to the next escrow in the sequence
+            uint256 nextTradeId = getNextTradeInSequence(_tradeId);
+            escrowContract.releaseCrypto(
+                _tradeId,
+                payable(trades[nextTradeId].taker)
+            );
+        }
+
         _updateTradeStatus(_tradeId, TradeStatus.FiatPaid);
         emit FiatMarkedAsPaid(_tradeId);
     }
-
-    /**
-     * @dev Finalizes a trade
-     * @param _tradeId The ID of the trade to finalize
-     */
 
     function finalizeTrade(
         uint256 _tradeId
@@ -354,11 +355,25 @@ contract Trade is ReentrancyGuardUpgradeable {
             "Only offer owner or admin can finalize the trade"
         );
 
+        uint256[] storage sequence = tradeSequence[_tradeId];
+        if (sequence.length > 0 && sequence[sequence.length - 1] == _tradeId) {
+            // If it's the last trade in the sequence, finalize the trade and release the crypto to the taker
+            escrowContract.releaseCrypto(
+                _tradeId,
+                payable(trades[_tradeId].taker)
+            );
+        } else {
+            // If it's an intermediate trade, finalize the trade and transfer the crypto to the next escrow in the sequence
+            uint256 nextTradeId = getNextTradeInSequence(_tradeId);
+            escrowContract.releaseCrypto(
+                _tradeId,
+                payable(trades[nextTradeId].taker)
+            );
+        }
+
         _updateTradeStatus(_tradeId, TradeStatus.Finalized);
         trades[_tradeId].tradeFinalizedTime = block.timestamp;
 
-        // Call the Escrow contract to release the crypto to the taker
-        escrowContract.releaseCrypto(_tradeId, payable(trades[_tradeId].taker));
         emit TradeFinalized(_tradeId, block.timestamp);
     }
 
@@ -632,5 +647,40 @@ contract Trade is ReentrancyGuardUpgradeable {
             disputedCount,
             timedOutCount
         );
+    }
+
+    function getPreviousTradeInSequence(
+        uint256 _tradeId
+    ) public view returns (uint256) {
+        uint256[] storage sequence = tradeSequence[_tradeId];
+        if (sequence.length > 1) {
+            for (uint256 i = 1; i < sequence.length; i++) {
+                if (sequence[i] == _tradeId) {
+                    return sequence[i - 1];
+                }
+            }
+        }
+        return 0;
+    }
+
+    function getTradeMaker(uint256 _tradeId) public view returns (address) {
+        TradeDetails memory trade = trades[_tradeId];
+        (address offerOwner, , , , , , , , , , , ) = offerContract
+            .getOfferDetails(trade.offerId);
+        return offerOwner;
+    }
+
+    function getNextTradeInSequence(
+        uint256 _tradeId
+    ) public view returns (uint256) {
+        uint256[] storage sequence = tradeSequence[_tradeId];
+        if (sequence.length > 1) {
+            for (uint256 i = 0; i < sequence.length - 1; i++) {
+                if (sequence[i] == _tradeId) {
+                    return sequence[i + 1];
+                }
+            }
+        }
+        return 0;
     }
 }
