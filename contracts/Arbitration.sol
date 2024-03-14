@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import "./ContractRegistry.sol";
 import "./Trade.sol";
 import "./Escrow.sol";
 import "./Account.sol";
@@ -12,9 +13,7 @@ import "./Account.sol";
 
 contract Arbitration {
     address public admin;
-    Trade private tradeContract;
-    Escrow private escrowContract;
-    Account private accountContract;
+    ContractRegistry public registry;
 
     enum DisputeStatus {
         Pending,
@@ -62,30 +61,15 @@ contract Arbitration {
     event DisputeResolutionCanceled(uint256 indexed tradeId, uint256 disputeId);
     event ResolutionTimelockUpdated(uint256 newTimelock);
 
-    constructor(
-        address _admin,
-        address _tradeContractAddress,
-        address _escrowContractAddress,
-        address _accountContractAddress
-    ) {
+    constructor(address _admin, address _registryAddress) {
         require(_admin != address(0), "Invalid admin address");
         require(
-            _tradeContractAddress != address(0),
-            "Invalid Trade contract address"
-        );
-        require(
-            _escrowContractAddress != address(0),
-            "Invalid Escrow contract address"
-        );
-        require(
-            _accountContractAddress != address(0),
-            "Invalid Account contract address"
+            _registryAddress != address(0),
+            "Invalid ContractRegistry address"
         );
 
         admin = _admin;
-        tradeContract = Trade(_tradeContractAddress);
-        escrowContract = Escrow(_escrowContractAddress);
-        accountContract = Account(_accountContractAddress);
+        registry = ContractRegistry(_registryAddress);
     }
 
     modifier onlyAdmin() {
@@ -95,19 +79,17 @@ contract Arbitration {
 
     modifier onlyTradeContract() {
         require(
-            msg.sender == address(tradeContract),
+            msg.sender == registry.tradeAddress(),
             "Only Trade contract can perform this action"
         );
         _;
     }
 
     modifier onlyTradeParty(uint256 _tradeId) {
-        (, address maker, , , , , , , , , , ) = tradeContract.getTradeDetails(
-            _tradeId
-        );
-        (, address taker, , , , , , , , , , ) = tradeContract.getTradeDetails(
-            _tradeId
-        );
+        (, address maker, , , , , , , , , , ) = Trade(registry.tradeAddress())
+            .getTradeDetails(_tradeId);
+        (, address taker, , , , , , , , , , ) = Trade(registry.tradeAddress())
+            .getTradeDetails(_tradeId);
         require(
             msg.sender == maker || msg.sender == taker,
             "Only trade parties can perform this action"
@@ -132,9 +114,8 @@ contract Arbitration {
     }
 
     modifier tradeExists(uint256 _tradeId) {
-        (uint256 offerId, , , , , , , , , , , ) = tradeContract.getTradeDetails(
-            _tradeId
-        );
+        (uint256 offerId, , , , , , , , , , , ) = Trade(registry.tradeAddress())
+            .getTradeDetails(_tradeId);
         require(offerId != 0, "Trade does not exist");
         _;
     }
@@ -219,22 +200,23 @@ contract Arbitration {
 
         disputes[_disputeId].status = DisputeStatus.Resolved;
 
-        (, address maker, , , , , , , , , , ) = tradeContract.getTradeDetails(
-            tradeId
-        );
-        (, address taker, , , , , , , , , , ) = tradeContract.getTradeDetails(
-            tradeId
-        );
+        (, address maker, , , , , , , , , , ) = Trade(registry.tradeAddress())
+            .getTradeDetails(tradeId);
+        (, address taker, , , , , , , , , , ) = Trade(registry.tradeAddress())
+            .getTradeDetails(tradeId);
 
         if (resolvedInFavorOfMaker) {
-            escrowContract.releaseCrypto(tradeId, payable(maker));
-            tradeContract.updateTradeStatusFromArbitration(
+            Escrow(registry.escrowAddress()).releaseCrypto(
+                tradeId,
+                payable(maker)
+            );
+            Trade(registry.tradeAddress()).updateTradeStatusFromArbitration(
                 tradeId,
                 Trade.TradeStatus.Finalized
             );
         } else {
-            escrowContract.refundCrypto(tradeId);
-            tradeContract.updateTradeStatusFromArbitration(
+            Escrow(registry.escrowAddress()).refundCrypto(tradeId);
+            Trade(registry.tradeAddress()).updateTradeStatusFromArbitration(
                 tradeId,
                 Trade.TradeStatus.Cancelled
             );
@@ -244,14 +226,14 @@ contract Arbitration {
         emit DisputeResolutionTimelockExpired(tradeId, _disputeId);
 
         // Update the disputes initiated for both maker and taker
-        accountContract.updateDisputesInitiated(maker);
-        accountContract.updateDisputesInitiated(taker);
+        Account(registry.accountAddress()).updateDisputesInitiated(maker);
+        Account(registry.accountAddress()).updateDisputesInitiated(taker);
 
         // Update the disputes lost based on the dispute outcome
         if (resolvedInFavorOfMaker) {
-            accountContract.updateDisputesLost(taker);
+            Account(registry.accountAddress()).updateDisputesLost(taker);
         } else {
-            accountContract.updateDisputesLost(maker);
+            Account(registry.accountAddress()).updateDisputesLost(maker);
         }
     }
 
@@ -326,8 +308,9 @@ contract Arbitration {
     function handleDispute(
         uint256 _tradeId
     ) public onlyTradeContract tradeExists(_tradeId) {
-        (, , , , , , , , Trade.TradeStatus tradeStatus, , , ) = tradeContract
-            .getTradeDetails(_tradeId);
+        (, , , , , , , , Trade.TradeStatus tradeStatus, , , ) = Trade(
+            registry.tradeAddress()
+        ).getTradeDetails(_tradeId);
         require(
             tradeStatus == Trade.TradeStatus.Disputed,
             "Trade is not in disputed status"
@@ -368,18 +351,20 @@ contract Arbitration {
         );
 
         uint256 tradeId = disputes[_disputeId].tradeId;
-        (, address maker, , , , , , , , , , ) = tradeContract.getTradeDetails(
-            tradeId
-        );
+        (, address maker, , , , , , , , , , ) = Trade(registry.tradeAddress())
+            .getTradeDetails(tradeId);
 
         disputes[_disputeId].status = DisputeStatus.Resolved;
         disputes[_disputeId].resolveTimestamp = block.timestamp;
         disputes[_disputeId].resolvedInFavorOfMaker = _resolveInFavorOfMaker;
 
         if (_resolveInFavorOfMaker) {
-            escrowContract.releaseCrypto(tradeId, payable(maker));
+            Escrow(registry.escrowAddress()).releaseCrypto(
+                tradeId,
+                payable(maker)
+            );
         } else {
-            escrowContract.refundCrypto(tradeId);
+            Escrow(registry.escrowAddress()).refundCrypto(tradeId);
         }
 
         emit DisputeResolved(tradeId, _disputeId, _resolveInFavorOfMaker);

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "./Account.sol";
+import "./ContractRegistry.sol";
 
 /**
  * @title Reputation contract for calculating user reputation scores
@@ -9,7 +10,7 @@ import "./Account.sol";
  */
 
 contract Reputation {
-    Account private accountContract;
+    ContractRegistry public registry;
 
     uint256 private constant REPUTATION_SCALE = 100;
     uint256 private constant TRADE_VOLUME_WEIGHT = 30;
@@ -19,12 +20,12 @@ contract Reputation {
     uint256 private constant RATING_WEIGHT = 10;
     uint256 private constant ENDORSEMENT_WEIGHT = 5;
 
-    constructor(address _accountContractAddress) {
+    constructor(address _registryAddress) {
         require(
-            _accountContractAddress != address(0),
-            "Invalid Account contract address"
+            _registryAddress != address(0),
+            "Invalid ContractRegistry address"
         );
-        accountContract = Account(_accountContractAddress);
+        registry = ContractRegistry(_registryAddress);
     }
 
     /**
@@ -34,7 +35,8 @@ contract Reputation {
      */
 
     function calculateReputation(address _user) public view returns (uint256) {
-        (, Account.UserStats memory stats) = accountContract.getUserInfo(_user);
+        (, Account.UserStats memory stats) = Account(registry.accountAddress())
+            .getUserInfo(_user);
 
         uint256 tradeVolumeScore = stats.userTotalTradeVolume *
             TRADE_VOLUME_WEIGHT;

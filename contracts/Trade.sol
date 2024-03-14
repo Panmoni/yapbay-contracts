@@ -5,6 +5,7 @@ import "./Offer.sol";
 import "./Escrow.sol";
 import "./Arbitration.sol";
 import "./Rating.sol";
+import "./ContractRegistry.sol";
 
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 
@@ -14,10 +15,7 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
  */
 
 contract Trade is ReentrancyGuardUpgradeable {
-    Offer private offerContract;
-    Escrow private escrowContract;
-    Arbitration private arbitrationContract;
-    Rating private ratingContract;
+    ContractRegistry public registry;
 
     address public owner;
 
@@ -55,16 +53,8 @@ contract Trade is ReentrancyGuardUpgradeable {
     mapping(uint256 => mapping(address => bool)) public tradeRatings;
     mapping(uint256 => uint256[]) public tradeSequence;
 
-    constructor(
-        address _offerContractAddress,
-        address _escrowContractAddress,
-        address _arbitrationContractAddress,
-        address _ratingContractAddress
-    ) {
-        offerContract = Offer(_offerContractAddress);
-        escrowContract = Escrow(_escrowContractAddress);
-        arbitrationContract = Arbitration(_arbitrationContractAddress);
-        ratingContract = Rating(_ratingContractAddress);
+    constructor(address _registryAddress) {
+        registry = ContractRegistry(_registryAddress);
 
         owner = msg.sender;
 
@@ -122,8 +112,9 @@ contract Trade is ReentrancyGuardUpgradeable {
     }
 
     modifier onlyTradeParty(uint256 _tradeId) {
-        (address offerOwner, , , , , , , , , , , ) = offerContract
-            .getOfferDetails(trades[_tradeId].offerId);
+        (address offerOwner, , , , , , , , , , , ) = Offer(
+            registry.offerAddress()
+        ).getOfferDetails(trades[_tradeId].offerId);
         require(
             trades[_tradeId].taker == msg.sender || offerOwner == msg.sender,
             "Only trade parties can perform this action"
@@ -233,7 +224,7 @@ contract Trade is ReentrancyGuardUpgradeable {
         TradeStatus _newStatus
     ) public {
         require(
-            msg.sender == address(arbitrationContract),
+            msg.sender == registry.arbitrationAddress(),
             "Only Arbitration contract can call this function"
         );
         _updateTradeStatus(_tradeId, _newStatus);
@@ -244,8 +235,9 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus == TradeStatus.Initiated,
             "Trade is not in initiated status"
         );
-        (address offerOwner, , , , , , , , , , , ) = offerContract
-            .getOfferDetails(trades[_tradeId].offerId);
+        (address offerOwner, , , , , , , , , , , ) = Offer(
+            registry.offerAddress()
+        ).getOfferDetails(trades[_tradeId].offerId);
         require(
             offerOwner == msg.sender,
             "Only offer owner can accept the trade"
@@ -254,14 +246,14 @@ contract Trade is ReentrancyGuardUpgradeable {
         uint256[] storage sequence = tradeSequence[_tradeId];
         if (sequence.length > 0 && sequence[0] == _tradeId) {
             // If it's the first trade in the sequence, lock the crypto in escrow
-            escrowContract.lockCrypto(
+            Escrow(registry.escrowAddress()).lockCrypto(
                 _tradeId,
                 trades[_tradeId].tradeAmountCrypto
             );
         } else {
             // If it's a subsequent trade, transfer the crypto from the previous escrow to the current escrow
             uint256 prevTradeId = getPreviousTradeInSequence(_tradeId);
-            escrowContract.transferEscrow(
+            Escrow(registry.escrowAddress()).transferEscrow(
                 prevTradeId,
                 _tradeId,
                 trades[_tradeId].tradeAmountCrypto
@@ -288,15 +280,19 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus != TradeStatus.Finalized,
             "Trade has already been finalized"
         );
-        (address offerOwner, , , , , , , , , , , ) = offerContract
-            .getOfferDetails(trades[_tradeId].offerId);
+        (address offerOwner, , , , , , , , , , , ) = Offer(
+            registry.offerAddress()
+        ).getOfferDetails(trades[_tradeId].offerId);
         require(
             offerOwner == msg.sender,
             "Only offer owner can lock crypto in escrow"
         );
 
         // Call the Escrow contract to lock the crypto
-        escrowContract.lockCrypto(_tradeId, trades[_tradeId].tradeAmountCrypto);
+        Escrow(registry.escrowAddress()).lockCrypto(
+            _tradeId,
+            trades[_tradeId].tradeAmountCrypto
+        );
         emit CryptoLockedInEscrow(_tradeId, trades[_tradeId].tradeAmountCrypto);
     }
 
@@ -313,14 +309,14 @@ contract Trade is ReentrancyGuardUpgradeable {
         uint256[] storage sequence = tradeSequence[_tradeId];
         if (sequence.length > 0 && sequence[sequence.length - 1] == _tradeId) {
             // If it's the last trade in the sequence, release the crypto to the taker
-            escrowContract.releaseCrypto(
+            Escrow(registry.escrowAddress()).releaseCrypto(
                 _tradeId,
                 payable(trades[_tradeId].taker)
             );
         } else {
             // If it's an intermediate trade, release the crypto to the next escrow in the sequence
             uint256 nextTradeId = getNextTradeInSequence(_tradeId);
-            escrowContract.releaseCrypto(
+            Escrow(registry.escrowAddress()).releaseCrypto(
                 _tradeId,
                 payable(trades[nextTradeId].taker)
             );
@@ -348,8 +344,9 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus != TradeStatus.Finalized,
             "Trade has already been finalized"
         );
-        (address offerOwner, , , , , , , , , , , ) = offerContract
-            .getOfferDetails(trades[_tradeId].offerId);
+        (address offerOwner, , , , , , , , , , , ) = Offer(
+            registry.offerAddress()
+        ).getOfferDetails(trades[_tradeId].offerId);
         require(
             offerOwner == msg.sender || admins[msg.sender],
             "Only offer owner or admin can finalize the trade"
@@ -358,14 +355,14 @@ contract Trade is ReentrancyGuardUpgradeable {
         uint256[] storage sequence = tradeSequence[_tradeId];
         if (sequence.length > 0 && sequence[sequence.length - 1] == _tradeId) {
             // If it's the last trade in the sequence, finalize the trade and release the crypto to the taker
-            escrowContract.releaseCrypto(
+            Escrow(registry.escrowAddress()).releaseCrypto(
                 _tradeId,
                 payable(trades[_tradeId].taker)
             );
         } else {
             // If it's an intermediate trade, finalize the trade and transfer the crypto to the next escrow in the sequence
             uint256 nextTradeId = getNextTradeInSequence(_tradeId);
-            escrowContract.releaseCrypto(
+            Escrow(registry.escrowAddress()).releaseCrypto(
                 _tradeId,
                 payable(trades[nextTradeId].taker)
             );
@@ -398,8 +395,9 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus != TradeStatus.Finalized,
             "Trade has already been finalized"
         );
-        (address offerOwner, , , , , , , , , , , ) = offerContract
-            .getOfferDetails(trades[_tradeId].offerId);
+        (address offerOwner, , , , , , , , , , , ) = Offer(
+            registry.offerAddress()
+        ).getOfferDetails(trades[_tradeId].offerId);
         require(
             trades[_tradeId].taker == msg.sender || offerOwner == msg.sender,
             "Only trade parties can dispute the trade"
@@ -409,7 +407,7 @@ contract Trade is ReentrancyGuardUpgradeable {
 
         // Call the Escrow contract to refund the crypto if it was locked
         if (trades[_tradeId].tradeStatus == TradeStatus.Accepted) {
-            escrowContract.refundCrypto(_tradeId);
+            Escrow(registry.escrowAddress()).refundCrypto(_tradeId);
         }
 
         emit TradeCancelled(_tradeId, trades[_tradeId].tradeCancelationReason);
@@ -436,8 +434,9 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus != TradeStatus.Finalized,
             "Trade has already been finalized"
         );
-        (address offerOwner, , , , , , , , , , , ) = offerContract
-            .getOfferDetails(trades[_tradeId].offerId);
+        (address offerOwner, , , , , , , , , , , ) = Offer(
+            registry.offerAddress()
+        ).getOfferDetails(trades[_tradeId].offerId);
         require(
             trades[_tradeId].taker == msg.sender || offerOwner == msg.sender,
             "Only trade parties can dispute the trade"
@@ -446,7 +445,7 @@ contract Trade is ReentrancyGuardUpgradeable {
         _updateTradeStatus(_tradeId, TradeStatus.Disputed);
 
         // Call the Arbitration contract to handle the dispute
-        arbitrationContract.handleDispute(_tradeId);
+        Arbitration(registry.arbitrationAddress()).handleDispute(_tradeId);
         emit TradeDisputed(_tradeId);
     }
 
@@ -478,7 +477,7 @@ contract Trade is ReentrancyGuardUpgradeable {
 
         // Call the Escrow contract to refund the crypto if it was locked
         if (trades[_tradeId].tradeStatus == TradeStatus.Accepted) {
-            escrowContract.refundCrypto(_tradeId);
+            Escrow(registry.escrowAddress()).refundCrypto(_tradeId);
         }
     }
 
@@ -497,7 +496,7 @@ contract Trade is ReentrancyGuardUpgradeable {
             "Trade cannot be refunded at this stage"
         );
         require(
-            msg.sender == address(escrowContract),
+            msg.sender == registry.escrowAddress(),
             "Only Escrow contract can call refund function"
         );
 
@@ -536,7 +535,11 @@ contract Trade is ReentrancyGuardUpgradeable {
         tradeRatings[_tradeId][msg.sender] = true;
 
         // Call the Rating contract to record the trade rating
-        ratingContract.rateTrade(_tradeId, _rating, _feedback);
+        Rating(registry.ratingAddress()).rateTrade(
+            _tradeId,
+            _rating,
+            _feedback
+        );
 
         emit TradeRated(_tradeId, _rating, _feedback);
     }
@@ -665,8 +668,9 @@ contract Trade is ReentrancyGuardUpgradeable {
 
     function getTradeMaker(uint256 _tradeId) public view returns (address) {
         TradeDetails memory trade = trades[_tradeId];
-        (address offerOwner, , , , , , , , , , , ) = offerContract
-            .getOfferDetails(trade.offerId);
+        (address offerOwner, , , , , , , , , , , ) = Offer(
+            registry.offerAddress()
+        ).getOfferDetails(trade.offerId);
         return offerOwner;
     }
 

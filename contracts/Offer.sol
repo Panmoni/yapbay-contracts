@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "./Account.sol";
+import "./ContractRegistry.sol";
 
 /**
  * @title Offer contract for managing trade offers
@@ -12,8 +13,7 @@ contract Offer {
     address public owner;
     bool public paused;
 
-    // Connect this contract with trade contract address.
-    address public tradeContract;
+    ContractRegistry public registry;
 
     enum OfferStatus {
         Active,
@@ -81,10 +81,13 @@ contract Offer {
     event ContractPaused();
     event ContractUnpaused();
 
-    constructor(address _tradeContract) {
-        require(_tradeContract != address(0), "Invalid Trade contract address");
+    constructor(address _registryAddress) {
+        require(
+            _registryAddress != address(0),
+            "Invalid ContractRegistry address"
+        );
         owner = msg.sender;
-        tradeContract = _tradeContract;
+        registry = ContractRegistry(_registryAddress);
     }
 
     // Or enable owner to change it?
@@ -104,7 +107,7 @@ contract Offer {
 
     modifier onlyTradeContract() {
         require(
-            msg.sender == tradeContract,
+            msg.sender == registry.tradeAddress(),
             "Only Trade contract can perform this action"
         );
         _;

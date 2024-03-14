@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import "./ContractRegistry.sol";
+
 /**
  * @title Account contract for managing user profiles and stats
  * @dev This contract handles user registration, profile updates, and maintains user statistics.
@@ -9,11 +11,7 @@ pragma solidity ^0.8.24;
 contract Account {
     address public owner;
 
-    // Connect this contract with trade contract address.
-    address public tradeContract;
-
-    // Connect this contract with arbitration contract address.
-    address public arbitrationContract;
+    ContractRegistry public registry;
 
     struct UserBasicInfo {
         uint256 userId;
@@ -63,8 +61,9 @@ contract Account {
     );
 
     // TODO: add trade and arbitration contract vars to constructor?
-    constructor() {
+    constructor(address _registryAddress) {
         owner = msg.sender;
+        registry = ContractRegistry(_registryAddress);
     }
 
     modifier onlyOwner() {
@@ -78,8 +77,8 @@ contract Account {
     modifier onlyAuthorized() {
         require(
             msg.sender == owner ||
-                msg.sender == tradeContract ||
-                msg.sender == arbitrationContract,
+                msg.sender == registry.tradeAddress() ||
+                msg.sender == registry.arbitrationAddress(),
             "Only authorized contracts can perform this action"
         );
         _;

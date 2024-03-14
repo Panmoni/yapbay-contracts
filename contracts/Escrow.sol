@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import "./Trade.sol";
 import "./Arbitration.sol";
+import "./ContractRegistry.sol";
 
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 
@@ -13,8 +14,7 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
 
 contract Escrow is ReentrancyGuardUpgradeable {
     address public admin;
-    Trade private tradeContract;
-    Arbitration private arbitrationContract;
+    ContractRegistry public registry;
 
     uint256 public platformFeePercentage;
     uint256 public penaltyPercentage;
@@ -55,19 +55,14 @@ contract Escrow is ReentrancyGuardUpgradeable {
 
     constructor(
         address _admin,
-        address _tradeContractAddress,
-        address _arbitrationContractAddress,
+        address _registryAddress,
         uint256 _platformFeePercentage,
         uint256 _penaltyPercentage
     ) {
         require(_admin != address(0), "Invalid admin address");
         require(
-            _tradeContractAddress != address(0),
-            "Invalid Trade contract address"
-        );
-        require(
-            _arbitrationContractAddress != address(0),
-            "Invalid Arbitration contract address"
+            _registryAddress != address(0),
+            "Invalid ContractRegistry address"
         );
         require(
             _platformFeePercentage <= 1,
@@ -79,8 +74,7 @@ contract Escrow is ReentrancyGuardUpgradeable {
         );
 
         admin = _admin;
-        tradeContract = Trade(_tradeContractAddress);
-        arbitrationContract = Arbitration(_arbitrationContractAddress);
+        registry = ContractRegistry(_registryAddress);
         platformFeePercentage = _platformFeePercentage;
         penaltyPercentage = _penaltyPercentage;
     }
@@ -92,7 +86,7 @@ contract Escrow is ReentrancyGuardUpgradeable {
 
     modifier onlyTradeContract() {
         require(
-            msg.sender == address(tradeContract),
+            msg.sender == registry.tradeAddress(),
             "Only the Trade contract can perform this action"
         );
         _;
@@ -100,7 +94,7 @@ contract Escrow is ReentrancyGuardUpgradeable {
 
     modifier onlyArbitrationContract() {
         require(
-            msg.sender == address(arbitrationContract),
+            msg.sender == registry.arbitrationAddress(),
             "Only the Arbitration contract can perform this action"
         );
         _;
@@ -181,9 +175,8 @@ contract Escrow is ReentrancyGuardUpgradeable {
         );
 
         // Determine the previous escrow account in the sequence
-        uint256 prevTradeId = tradeContract.getPreviousTradeInSequence(
-            _tradeId
-        );
+        uint256 prevTradeId = Trade(registry.tradeAddress())
+            .getPreviousTradeInSequence(_tradeId);
 
         // Check if there is a previous trade in the sequence
         if (prevTradeId != 0) {
@@ -204,9 +197,8 @@ contract Escrow is ReentrancyGuardUpgradeable {
             // If there is no previous trade, refund the crypto to the original sender
             uint256 refundAmount = escrows[_tradeId].amount;
             escrows[_tradeId].amount = 0;
-            payable(tradeContract.getTradeMaker(_tradeId)).transfer(
-                refundAmount
-            );
+            payable(Trade(registry.tradeAddress()).getTradeMaker(_tradeId))
+                .transfer(refundAmount);
 
             // Update the escrow balances and state variables accordingly
             escrows[_tradeId].isLocked = false;
@@ -401,7 +393,8 @@ contract Escrow is ReentrancyGuardUpgradeable {
 
         // Check if the destination trade exists
         require(
-            _destTradeId > 0 && _destTradeId <= tradeContract.tradeCount(),
+            _destTradeId > 0 &&
+                _destTradeId <= Trade(registry.tradeAddress()).tradeCount(),
             "Destination trade does not exist"
         );
 

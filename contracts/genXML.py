@@ -7,7 +7,8 @@ contracts = [
     "Offer.sol",
     "Rating.sol",
     "Reputation.sol",
-    "Trade.sol"
+    "Trade.sol",
+    "ContractRegistry.sol"
 ]
 
 xml_content = "<documents>\n"
