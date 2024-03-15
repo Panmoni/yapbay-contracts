@@ -25,10 +25,10 @@ async function main() {
   // Set the deployer as an admin
   const adminRole = "admin"; // Specify the admin role
   await account.userUpdateProfile(
-    ethers.utils.formatBytes32String("me@georgedonnelly.com"), // Empty email
-    ethers.utils.formatBytes32String("georgedonnelly"), // Empty chat handle
-    ethers.utils.formatBytes32String("https://georgedonnelly.com"), // Empty website
-    "https://static.panmoni.org/georgedonnellycom/georgedonnelly.jpg", // Empty avatar URL
+    ethers.utils.formatBytes32String("me@georgedonnelly.com"), //  email
+    ethers.utils.formatBytes32String("georgedonnelly"), // chat handle
+    ethers.utils.formatBytes32String("https://georgedonnelly.com"), // website
+    "https://static.panmoni.org/georgedonnellycom/georgedonnelly.jpg", // avatar URL
     adminRole
   );
 
