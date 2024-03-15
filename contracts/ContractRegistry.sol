@@ -14,8 +14,23 @@ contract ContractRegistry {
 
     event ContractAddressUpdated(string contractName, address newAddress);
 
-    constructor() {
+    constructor(
+        address _accountAddress,
+        address _offerAddress,
+        address _tradeAddress,
+        address _escrowAddress,
+        address _ratingAddress,
+        address _reputationAddress,
+        address _arbitrationAddress
+    ) {
         owner = msg.sender;
+        accountAddress = _accountAddress;
+        offerAddress = _offerAddress;
+        tradeAddress = _tradeAddress;
+        escrowAddress = _escrowAddress;
+        ratingAddress = _ratingAddress;
+        reputationAddress = _reputationAddress;
+        arbitrationAddress = _arbitrationAddress;
     }
 
     modifier onlyOwner() {

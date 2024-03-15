@@ -60,7 +60,6 @@ contract Account {
         string newRole
     );
 
-    // TODO: add trade and arbitration contract vars to constructor?
     constructor(address _registryAddress) {
         owner = msg.sender;
         registry = ContractRegistry(_registryAddress);
