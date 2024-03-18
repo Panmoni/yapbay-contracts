@@ -66,4 +66,10 @@ contract ContractRegistry {
         emit ContractAddressUpdated("Reputation", _reputationAddress);
         emit ContractAddressUpdated("Arbitration", _arbitrationAddress);
     }
+
+    // Just update the Offer contract address
+    function updateOfferAddress(address _offerAddress) public onlyOwner {
+        require(_offerAddress != address(0), "Invalid Offer address");
+        offerAddress = _offerAddress;
+    }
 }

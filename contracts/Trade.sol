@@ -112,7 +112,7 @@ contract Trade is ReentrancyGuardUpgradeable {
     }
 
     modifier onlyTradeParty(uint256 _tradeId) {
-        (address offerOwner, , , , , , , , , , , ) = Offer(
+        (address offerOwner, , , , , , , , , , , , , , , , , ) = Offer(
             registry.offerAddress()
         ).getOfferDetails(trades[_tradeId].offerId);
         require(
@@ -235,7 +235,7 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus == TradeStatus.Initiated,
             "Trade is not in initiated status"
         );
-        (address offerOwner, , , , , , , , , , , ) = Offer(
+        (address offerOwner, , , , , , , , , , , , , , , , , ) = Offer(
             registry.offerAddress()
         ).getOfferDetails(trades[_tradeId].offerId);
         require(
@@ -280,7 +280,7 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus != TradeStatus.Finalized,
             "Trade has already been finalized"
         );
-        (address offerOwner, , , , , , , , , , , ) = Offer(
+        (address offerOwner, , , , , , , , , , , , , , , , , ) = Offer(
             registry.offerAddress()
         ).getOfferDetails(trades[_tradeId].offerId);
         require(
@@ -344,7 +344,7 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus != TradeStatus.Finalized,
             "Trade has already been finalized"
         );
-        (address offerOwner, , , , , , , , , , , ) = Offer(
+        (address offerOwner, , , , , , , , , , , , , , , , , ) = Offer(
             registry.offerAddress()
         ).getOfferDetails(trades[_tradeId].offerId);
         require(
@@ -395,7 +395,7 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus != TradeStatus.Finalized,
             "Trade has already been finalized"
         );
-        (address offerOwner, , , , , , , , , , , ) = Offer(
+        (address offerOwner, , , , , , , , , , , , , , , , , ) = Offer(
             registry.offerAddress()
         ).getOfferDetails(trades[_tradeId].offerId);
         require(
@@ -434,7 +434,7 @@ contract Trade is ReentrancyGuardUpgradeable {
             trades[_tradeId].tradeStatus != TradeStatus.Finalized,
             "Trade has already been finalized"
         );
-        (address offerOwner, , , , , , , , , , , ) = Offer(
+        (address offerOwner, , , , , , , , , , , , , , , , , ) = Offer(
             registry.offerAddress()
         ).getOfferDetails(trades[_tradeId].offerId);
         require(
@@ -668,7 +668,7 @@ contract Trade is ReentrancyGuardUpgradeable {
 
     function getTradeMaker(uint256 _tradeId) public view returns (address) {
         TradeDetails memory trade = trades[_tradeId];
-        (address offerOwner, , , , , , , , , , , ) = Offer(
+        (address offerOwner, , , , , , , , , , , , , , , , , ) = Offer(
             registry.offerAddress()
         ).getOfferDetails(trade.offerId);
         return offerOwner;

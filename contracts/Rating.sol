@@ -118,7 +118,7 @@ contract Rating {
         ).getTradeDetails(_tradeId);
         address rateeId;
         if (msg.sender == taker) {
-            (address offerOwner, , , , , , , , , , , ) = Offer(
+            (address offerOwner, , , , , , , , , , , , , , , , , ) = Offer(
                 registry.offerAddress()
             ).getOfferDetails(offerId);
             rateeId = offerOwner;

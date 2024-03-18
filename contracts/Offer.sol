@@ -34,6 +34,12 @@ contract Offer {
         OfferStatus offerStatus;
         uint256 offerCreatedTime;
         uint256 offerLastUpdatedTime;
+        bool offerBuyingCrypto;
+        string offerCountry;
+        string offerPaymentMethod;
+        string offerTerms;
+        int256 offerRate;
+        string offerTitle;
     }
 
     uint256 public offerCount;
@@ -145,7 +151,13 @@ contract Offer {
     function offerCreate(
         uint256 _minTradeAmount,
         uint256 _maxTradeAmount,
-        string memory _fiatCurrency
+        string memory _fiatCurrency,
+        bool _buyingCrypto,
+        string memory _country,
+        string memory _paymentMethod,
+        string memory _terms,
+        int256 _rate,
+        string memory _title
     ) public whenNotPaused {
         require(
             _minTradeAmount <= _maxTradeAmount,
@@ -155,13 +167,26 @@ contract Offer {
             bytes(_fiatCurrency).length > 0,
             "Fiat currency cannot be empty"
         );
+        require(bytes(_country).length > 0, "Country cannot be empty");
+        require(
+            bytes(_paymentMethod).length > 0,
+            "Payment method cannot be empty"
+        );
+        require(bytes(_terms).length > 0, "Terms cannot be empty");
+        require(bytes(_title).length > 0, "Title cannot be empty");
 
         bytes32 offerHash = keccak256(
             abi.encodePacked(
                 msg.sender,
                 _minTradeAmount,
                 _maxTradeAmount,
-                _fiatCurrency
+                _fiatCurrency,
+                _buyingCrypto,
+                _country,
+                _paymentMethod,
+                _terms,
+                _rate,
+                _title
             )
         );
         require(
@@ -183,7 +208,13 @@ contract Offer {
             _fiatCurrency,
             OfferStatus.Active,
             block.timestamp,
-            block.timestamp
+            block.timestamp,
+            _buyingCrypto,
+            _country,
+            _paymentMethod,
+            _terms,
+            _rate,
+            _title
         );
 
         userOffers[msg.sender].push(offerCount);
@@ -209,7 +240,13 @@ contract Offer {
         uint256 _offerId,
         uint256 _minTradeAmount,
         uint256 _maxTradeAmount,
-        OfferStatus _status
+        OfferStatus _status,
+        bool _buyingCrypto,
+        string memory _country,
+        string memory _paymentMethod,
+        string memory _terms,
+        int256 _rate,
+        string memory _title
     ) public offerExists(_offerId) {
         require(
             offers[_offerId].offerOwner == msg.sender,
@@ -236,6 +273,12 @@ contract Offer {
         }
 
         offer.offerLastUpdatedTime = block.timestamp;
+        offer.offerBuyingCrypto = _buyingCrypto;
+        offer.offerCountry = _country;
+        offer.offerPaymentMethod = _paymentMethod;
+        offer.offerTerms = _terms;
+        offer.offerRate = _rate;
+        offer.offerTitle = _title;
 
         emit OfferUpdated(_offerId, _minTradeAmount, _maxTradeAmount, _status);
 
@@ -275,7 +318,13 @@ contract Offer {
             string memory,
             bool,
             uint256,
-            uint256
+            uint256,
+            bool,
+            string memory,
+            string memory,
+            string memory,
+            int256,
+            string memory
         )
     {
         OfferDetails memory offer = offers[_offerId];
@@ -291,7 +340,13 @@ contract Offer {
             offer.offerFiatCurrency,
             offer.offerStatus == OfferStatus.Active,
             offer.offerCreatedTime,
-            offer.offerLastUpdatedTime
+            offer.offerLastUpdatedTime,
+            offer.offerBuyingCrypto,
+            offer.offerCountry,
+            offer.offerPaymentMethod,
+            offer.offerTerms,
+            offer.offerRate,
+            offer.offerTitle
         );
     }
 
