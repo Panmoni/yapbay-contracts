@@ -2,7 +2,7 @@ const { ethers } = require("hardhat");
 
 async function main() {
   // Get the deployed ContractRegistry instance
-  const contractRegistryAddress = "0x26282F41dFBA4396BC82418e8aD9e43682afF064";
+  const contractRegistryAddress = process.env.CONTRACT_REGISTRY_ADDRESS;
   const ContractRegistry = await ethers.getContractFactory("ContractRegistry");
   const registry = await ContractRegistry.attach(contractRegistryAddress);
 
